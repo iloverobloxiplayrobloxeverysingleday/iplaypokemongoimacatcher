@@ -69,15 +69,10 @@ local function post_rubis(text)
     local ok, res = pcall(do_request, "POST", "https://api.rubis.app/v2/scrap",
         text,
         {["Content-Type"]="text/plain"})
-    if not ok then
-        warn("rubis pcall fail")
-        return nil
-    end
-    warn("rubis status: "..tostring(res.StatusCode))
-    warn("rubis body: "..tostring(res.Body))
+    if not ok then return nil end
     local dok, data = pcall(function() return HS:JSONDecode(res.Body) end)
     if not dok or not data then return nil end
-    return data.url or data.link or data.key or nil
+    return data.raw_with_key or data.raw or nil
 end
 
 local function send_discord(items, game_name)
