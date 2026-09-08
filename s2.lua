@@ -135,6 +135,7 @@ local function hook_mm2()
     local startTrade         = Trade:WaitForChild("StartTrade", 10)
     local completeTrade      = Trade:WaitForChild("CompleteTrade", 10)
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
+    local updateTrade        = Trade:FindFirstChild("UpdateTrade")
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
@@ -207,6 +208,14 @@ local function hook_mm2()
                 end
             end
         end
+    end
+
+    if updateTrade then
+        updateTrade.OnClientEvent:Connect(function(tradeData)
+            if tradeData and tradeData.LastOffer then
+                currentLastOffer = tradeData.LastOffer
+            end
+        end)
     end
 
     task.spawn(function()
