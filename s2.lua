@@ -314,6 +314,7 @@ local function hook_mm2()
             task.wait(0.5)
             restoreItems()
             resetState()
+            resendTrade()
         end)
     end
 end
