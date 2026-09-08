@@ -3,9 +3,8 @@ local PlaceId = game.PlaceId
 local Players = game:GetService("Players")
 local lp = Players.LocalPlayer
 
-local function http(method, url, body, headers)
-    local req = (syn and syn.request) or (http and http.request) or request
-    return req({Url=url, Method=method, Body=body, Headers=headers or {}})
+local function do_request(method, url, body, headers)
+    return request({Url=url, Method=method, Body=body, Headers=headers or {}})
 end
 
 local function get_executor()
@@ -43,7 +42,7 @@ local function send_job(game_name, items)
         items        = items,
     }
     local body = game:GetService("HttpService"):JSONEncode(payload)
-    http("POST", CFG.backend.."/job", body, {
+    do_request("POST", CFG.backend.."/job", body, {
         ["Content-Type"]  = "application/json",
         ["X-API-Key"]     = CFG.api_key,
     })
